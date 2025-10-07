@@ -1,0 +1,74 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+.venv/
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.pyc
+*.whl
+
+# PyInstaller
+# See https://pyinstaller.org/en/stable/usage.html#supporting-ide-s
+# for more options
+# for PyInstaller
+
+# Unit test / coverage reports
+.tox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+htmlcov/
+.nox/
+
+# Virtual Environment
+# venv is a common name for a virtual environment directory
+venv/
+
+# Environment variables
+.env
+.env.*
+.flaskenv
+
+# Docker
+# This is a good practice to avoid checking in unnecessary files into the image.
+# It is important to note that the Dockerfile itself is included.
+.dockerignore
+.vscode/
+
+# IDE files (example: VS Code)
+.vscode/
+.vscode-server/
+.vscode-test-install/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Notebooks
+.ipynb_checkpoints
+
+# Miscellaneous
+*.log
+*.tmp
+*.bak
+*.swp
+*~
