@@ -11,3 +11,8 @@ class InstanceData(BaseModel):
 class InstanceID(BaseModel):
     """Data model for terminating an instance."""
     container_id: str = Field(..., description="The ID of the container to terminate.")
+
+class InstanceInfo(BaseModel):
+    """Data model for instance information."""
+    id: str = Field(..., description="The container ID.")
+    name: str = Field(..., description="The container name.")

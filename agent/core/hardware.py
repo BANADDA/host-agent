@@ -35,7 +35,7 @@ def get_running_instances() -> list[InstanceInfo]:
     """Get a list of containers managed by this agent."""
     try:
         containers = client.containers.list(filters={"name": "rental-instance"})
-        return [{"id": c.id, "name": c.name} for c in containers]
+        return [InstanceInfo(id=c.id, name=c.name) for c in containers]
     except Exception as e:
         logger.error(f"Failed to get running containers: {e}")
         return []
