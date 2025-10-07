@@ -1,7 +1,6 @@
 # host-agent/agent/main.py
 import asyncio
 import logging
-import uuid
 
 import uvicorn
 import websockets
@@ -10,15 +9,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from .api.commands import router as commands_router
 from .core.config import settings
 from .core.hardware import report_resources
+from .core.state import agent_instance_id, websocket_connections
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="Host Agent")
-
-# Generate a unique ID for this specific agent instance on startup
-agent_instance_id = str(uuid.uuid4())
-
-# Store active WebSocket connections
-websocket_connections = {}
 
 app.include_router(commands_router)
 

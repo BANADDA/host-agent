@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from ..deployment import docker_manager
-from ..main import agent_instance_id, websocket_connections
+from ..core.state import agent_instance_id, websocket_connections
 from .schemas import InstanceData, InstanceID
 
 router = APIRouter()
