@@ -98,7 +98,7 @@ def get_system_info():
         }
         
         return {
-            "hostname": hostname,
+            "hostname": hostname, 
             "os": os_info,
             "kernel": kernel,
             "uptime_seconds": int(uptime_seconds),
