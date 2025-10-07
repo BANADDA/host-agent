@@ -5,3 +5,4 @@ requests
 pydantic-settings
 docker
 websockets
+psutil
