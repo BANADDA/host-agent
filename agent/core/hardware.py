@@ -28,16 +28,36 @@ async def get_gpu_info():
             parts = line.split(',')
             if len(parts) >= 9:
                 uuid, name, total_memory, used_memory, temp, power_usage, power_limit, utilization, fan_speed = parts
+                def safe_int(value):
+                    """Safely convert string to int, handling N/A and [N/A] values."""
+                    value = value.strip()
+                    if value in ['N/A', '[N/A]', '']:
+                        return None
+                    try:
+                        return int(value)
+                    except ValueError:
+                        return None
+                
+                def safe_float(value):
+                    """Safely convert string to float, handling N/A and [N/A] values."""
+                    value = value.strip()
+                    if value in ['N/A', '[N/A]', '']:
+                        return None
+                    try:
+                        return float(value)
+                    except ValueError:
+                        return None
+                
                 gpus.append({
                     "uuid": uuid.strip(),
                     "name": name.strip(),
-                    "memory_total_mb": int(total_memory.strip()),
-                    "memory_used_mb": int(used_memory.strip()),
-                    "temperature_c": int(temp.strip()) if temp.strip() != 'N/A' else None,
-                    "power_usage_w": float(power_usage.strip()) if power_usage.strip() != 'N/A' else None,
-                    "power_limit_w": float(power_limit.strip()) if power_limit.strip() != 'N/A' else None,
-                    "utilization_percent": int(utilization.strip()) if utilization.strip() != 'N/A' else None,
-                    "fan_speed_percent": int(fan_speed.strip()) if fan_speed.strip() != 'N/A' else None
+                    "memory_total_mb": safe_int(total_memory),
+                    "memory_used_mb": safe_int(used_memory),
+                    "temperature_c": safe_int(temp),
+                    "power_usage_w": safe_float(power_usage),
+                    "power_limit_w": safe_float(power_limit),
+                    "utilization_percent": safe_int(utilization),
+                    "fan_speed_percent": safe_int(fan_speed)
                 })
         return gpus
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
