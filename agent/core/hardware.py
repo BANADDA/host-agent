@@ -551,11 +551,3 @@ async def report_resources(agent_instance_id: str):
             logger.error(f"Failed to report resources to API server: {e}")
 
         await asyncio.sleep(settings.report_interval_seconds)
-            logger.info(f"Reporting comprehensive resources: {json.dumps(payload, indent=2)}")
-            response = requests.post(f"{settings.api_server_url}/api/hosts/report", json=payload)
-            response.raise_for_status()
-            logger.info("Successfully reported comprehensive resources.")
-        except Exception as e:
-            logger.error(f"Failed to report resources to API server: {e}")
-
-        await asyncio.sleep(settings.report_interval_seconds)
