@@ -1,5 +1,0 @@
-[33mc3415cb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Fix GPU data parsing for N/A values
-[33m8b7fda9[m[33m ([m[1;31morigin/main[m[33m)[m Implement comprehensive hardware monitoring system
-[33mc4536ac[m Add missing InstanceInfo schema and fix hardware.py
-[33mf9a78a8[m Fix circular import by creating shared state module
-[33m0aae5b2[m 	modified:   .github/workflows/ci.yml
