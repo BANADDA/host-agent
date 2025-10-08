@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   release:
     types: [published]
 
@@ -37,3 +39,4 @@ jobs:
           tags: |
             ghcr.io/${{ steps.repo.outputs.repository }}:${{ github.sha }}
             ghcr.io/${{ steps.repo.outputs.repository }}:latest
+            ${{ github.ref_name != 'main' && format('ghcr.io/{0}:{1}', steps.repo.outputs.repository, github.ref_name) || '' }}
