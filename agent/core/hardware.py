@@ -74,8 +74,20 @@ def get_system_info():
         uptime_seconds = time.time() - psutil.boot_time()
         
         # CPU info
+        cpu_model = platform.processor()
+        if not cpu_model or cpu_model == "":
+            # Try to get CPU model from /proc/cpuinfo
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('model name'):
+                            cpu_model = line.split(':')[1].strip()
+                            break
+            except:
+                cpu_model = "Unknown CPU"
+        
         cpu_info = {
-            "model": platform.processor(),
+            "model": cpu_model,
             "cores": psutil.cpu_count(logical=False),
             "threads": psutil.cpu_count(logical=True),
             "usage_percent": psutil.cpu_percent(interval=1)
@@ -121,7 +133,24 @@ def get_health_info():
                 temp_millicelsius = int(f.read().strip())
                 system_temp = temp_millicelsius / 1000
         except:
-            pass
+            # Try alternative temperature sources
+            try:
+                # Try sensors command if available
+                result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    sensors_data = json.loads(result.stdout)
+                    # Look for CPU temperature
+                    for device, data in sensors_data.items():
+                        if 'Core 0' in data or 'Package id 0' in data:
+                            for key, value in data.items():
+                                if 'temp1_input' in key or 'Core 0' in key:
+                                    if isinstance(value, (int, float)) and value > 0:
+                                        system_temp = value
+                                        break
+                            if system_temp:
+                                break
+            except:
+                pass
         
         # Last reboot time
         last_reboot = datetime.fromtimestamp(psutil.boot_time()).isoformat() + 'Z'
@@ -156,6 +185,27 @@ def get_network_info():
         except:
             pass
         
+        # Try to get bandwidth info from system
+        try:
+            # Check if speedtest-cli is available
+            result = subprocess.run(['which', 'speedtest-cli'], capture_output=True, text=True)
+            if result.returncode == 0:
+                # Run a quick speed test
+                speed_result = subprocess.run(['speedtest-cli', '--simple'], capture_output=True, text=True, timeout=30)
+                if speed_result.returncode == 0:
+                    lines = speed_result.stdout.strip().split('\n')
+                    for line in lines:
+                        if 'Download:' in line:
+                            # Extract download speed
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                speed_str = parts[1]
+                                if 'Mbit/s' in speed_str:
+                                    bandwidth_mbps = float(speed_str.replace('Mbit/s', ''))
+                                break
+        except:
+            pass
+        
         # Internet connectivity
         internet_connected = False
         docker_registry_accessible = False
@@ -184,7 +234,8 @@ def get_docker_info():
         docker_version = None
         try:
             result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
-            docker_version = result.stdout.strip()
+            if result.returncode == 0:
+                docker_version = result.stdout.strip()
         except:
             pass
         
@@ -207,15 +258,33 @@ def get_docker_info():
                     if item['Type'] == 'Images':
                         disk_usage = item['Size']
         except:
-            pass
+            # Fallback: try to get disk usage from docker info
+            try:
+                result = subprocess.run(['docker', 'system', 'df'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if 'Images' in line:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                disk_usage = parts[2]  # Size column
+                            break
+            except:
+                pass
         
         # NVIDIA runtime availability
         nvidia_runtime_available = False
         try:
             result = subprocess.run(['docker', 'info'], capture_output=True, text=True)
-            nvidia_runtime_available = 'nvidia' in result.stdout.lower()
+            if result.returncode == 0:
+                nvidia_runtime_available = 'nvidia' in result.stdout.lower()
         except:
-            pass
+            # Fallback: check if nvidia-smi works
+            try:
+                result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
+                nvidia_runtime_available = result.returncode == 0
+            except:
+                pass
         
         return {
             "version": docker_version,
@@ -237,6 +306,15 @@ def get_location_info():
         instance_type = "unknown"
         region = "unknown"
         cost_per_hour_usd = None
+        
+        # Try to detect from hostname patterns
+        hostname = socket.gethostname()
+        if 'aws' in hostname.lower() or 'ec2' in hostname.lower():
+            provider = "AWS"
+        elif 'gcp' in hostname.lower() or 'google' in hostname.lower():
+            provider = "GCP"
+        elif 'azure' in hostname.lower() or 'microsoft' in hostname.lower():
+            provider = "Azure"
         
         # AWS detection
         try:
