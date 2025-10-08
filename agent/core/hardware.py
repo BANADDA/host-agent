@@ -128,29 +128,45 @@ def get_health_info():
         # System temperature (if available)
         system_temp = None
         try:
-            # Try to get system temperature from thermal zones
-            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                temp_millicelsius = int(f.read().strip())
-                system_temp = temp_millicelsius / 1000
-        except:
-            # Try alternative temperature sources
-            try:
-                # Try sensors command if available
-                result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    sensors_data = json.loads(result.stdout)
-                    # Look for CPU temperature
-                    for device, data in sensors_data.items():
-                        if 'Core 0' in data or 'Package id 0' in data:
-                            for key, value in data.items():
-                                if 'temp1_input' in key or 'Core 0' in key:
-                                    if isinstance(value, (int, float)) and value > 0:
-                                        system_temp = value
-                                        break
-                            if system_temp:
+            # Try psutil sensors first (most reliable)
+            if hasattr(psutil, 'sensors_temperatures'):
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    for name, entries in temps.items():
+                        for entry in entries:
+                            if entry.current and entry.current > 0:
+                                system_temp = entry.current
                                 break
-            except:
-                pass
+                        if system_temp:
+                            break
+        except Exception as e:
+            logger.error(f"Failed to get temperature via psutil: {e}")
+        
+        if system_temp is None:
+            try:
+                # Try thermal zones
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp_millicelsius = int(f.read().strip())
+                    system_temp = temp_millicelsius / 1000
+            except Exception as e:
+                logger.error(f"Failed to read thermal zone: {e}")
+                # Try sensors command if available
+                try:
+                    result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        sensors_data = json.loads(result.stdout)
+                        # Look for CPU temperature
+                        for device, data in sensors_data.items():
+                            if 'Core 0' in data or 'Package id 0' in data:
+                                for key, value in data.items():
+                                    if 'temp1_input' in key or 'Core 0' in key:
+                                        if isinstance(value, (int, float)) and value > 0:
+                                            system_temp = value
+                                            break
+                                if system_temp:
+                                    break
+                except Exception as e2:
+                    logger.error(f"Failed to get temperature via sensors: {e2}")
         
         # Last reboot time
         last_reboot = datetime.fromtimestamp(psutil.boot_time()).isoformat() + 'Z'
@@ -210,11 +226,18 @@ def get_network_info():
         internet_connected = False
         docker_registry_accessible = False
         try:
-            response = requests.get('https://registry-1.docker.io', timeout=5)
-            docker_registry_accessible = response.status_code == 200
+            # Check Docker Hub API (returns 401 but confirms reachability)
+            response = requests.get('https://hub.docker.com/v2/', timeout=5)
+            docker_registry_accessible = response.status_code < 500  # Allow 401/403
             internet_connected = True
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to check Docker registry accessibility: {e}")
+            # Fallback: just check internet connectivity
+            try:
+                response = requests.get('https://httpbin.org/get', timeout=5)
+                internet_connected = response.status_code == 200
+            except:
+                pass
         
         return {
             "public_ip": public_ip,
@@ -230,14 +253,19 @@ def get_network_info():
 def get_docker_info():
     """Get Docker environment information."""
     try:
-        # Docker version
+        # Docker version using Python SDK
         docker_version = None
         try:
-            result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
-            if result.returncode == 0:
-                docker_version = result.stdout.strip()
-        except:
-            pass
+            docker_version = client.version()['Version']
+        except Exception as e:
+            logger.error(f"Failed to get Docker version: {e}")
+            # Fallback to subprocess if SDK fails
+            try:
+                result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    docker_version = result.stdout.strip()
+            except Exception as e2:
+                logger.error(f"Fallback Docker version check failed: {e2}")
         
         # Container info
         containers = client.containers.list()
@@ -278,13 +306,18 @@ def get_docker_info():
             result = subprocess.run(['docker', 'info'], capture_output=True, text=True)
             if result.returncode == 0:
                 nvidia_runtime_available = 'nvidia' in result.stdout.lower()
-        except:
+            else:
+                logger.error(f"Docker info failed: returncode={result.returncode}, stderr={result.stderr}")
+        except Exception as e:
+            logger.error(f"Failed to check Docker info for NVIDIA runtime: {e}")
             # Fallback: check if nvidia-smi works
             try:
                 result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
                 nvidia_runtime_available = result.returncode == 0
-            except:
-                pass
+                if result.returncode != 0:
+                    logger.error(f"nvidia-smi failed: returncode={result.returncode}, stderr={result.stderr}")
+            except Exception as e2:
+                logger.error(f"nvidia-smi fallback failed: {e2}")
         
         return {
             "version": docker_version,
@@ -301,59 +334,123 @@ def get_docker_info():
 def get_location_info():
     """Get location and provider information."""
     try:
-        # Try to detect cloud provider
+        # Use ipinfo.io for comprehensive location data
         provider = "unknown"
         instance_type = "unknown"
         region = "unknown"
         cost_per_hour_usd = None
         
-        # Try to detect from hostname patterns
-        hostname = socket.gethostname()
-        if 'aws' in hostname.lower() or 'ec2' in hostname.lower():
-            provider = "AWS"
-        elif 'gcp' in hostname.lower() or 'google' in hostname.lower():
-            provider = "GCP"
-        elif 'azure' in hostname.lower() or 'microsoft' in hostname.lower():
-            provider = "Azure"
-        
-        # AWS detection
         try:
-            response = requests.get('http://169.254.169.254/latest/meta-data/instance-type', timeout=2)
+            response = requests.get('https://ipinfo.io/json', timeout=10)
             if response.status_code == 200:
+                ipinfo_data = response.json()
+                
+                # Extract provider from organization
+                org = ipinfo_data.get('org', '')
+                if 'Hetzner' in org:
+                    provider = "Hetzner"
+                elif 'Amazon' in org or 'AWS' in org:
+                    provider = "AWS"
+                elif 'Google' in org or 'GCP' in org:
+                    provider = "GCP"
+                elif 'Microsoft' in org or 'Azure' in org:
+                    provider = "Azure"
+                elif 'DigitalOcean' in org:
+                    provider = "DigitalOcean"
+                elif 'Linode' in org:
+                    provider = "Linode"
+                elif 'Vultr' in org:
+                    provider = "Vultr"
+                elif 'OVH' in org:
+                    provider = "OVH"
+                else:
+                    # Try to extract provider from org string
+                    org_lower = org.lower()
+                    if 'hetzner' in org_lower:
+                        provider = "Hetzner"
+                    elif 'amazon' in org_lower or 'aws' in org_lower:
+                        provider = "AWS"
+                    elif 'google' in org_lower:
+                        provider = "GCP"
+                    elif 'microsoft' in org_lower or 'azure' in org_lower:
+                        provider = "Azure"
+                    else:
+                        provider = "Other"
+                
+                # Extract region and location info
+                region = ipinfo_data.get('region', 'unknown')
+                city = ipinfo_data.get('city', '')
+                country = ipinfo_data.get('country', '')
+                
+                # Create a more descriptive region
+                if city and country:
+                    region = f"{city}, {country}"
+                elif region != 'unknown':
+                    region = f"{region}, {country}" if country else region
+                
+                # Get hostname for instance type detection
+                hostname = ipinfo_data.get('hostname', '')
+                
+                # Try to detect instance type from hostname patterns
+                if provider == "AWS" and 'ec2' in hostname.lower():
+                    instance_type = "EC2"
+                elif provider == "GCP" and 'compute' in hostname.lower():
+                    instance_type = "Compute Engine"
+                elif provider == "Azure" and 'cloudapp' in hostname.lower():
+                    instance_type = "Virtual Machine"
+                elif provider == "Hetzner":
+                    instance_type = "Cloud Server"
+                else:
+                    instance_type = "Virtual Machine"
+                
+                # Estimate cost based on provider and region
+                if provider == "Hetzner":
+                    cost_per_hour_usd = 0.05  # Approximate for small instances
+                elif provider == "AWS":
+                    if "us-" in region.lower():
+                        cost_per_hour_usd = 0.10
+                    else:
+                        cost_per_hour_usd = 0.12
+                elif provider == "GCP":
+                    cost_per_hour_usd = 0.08
+                elif provider == "Azure":
+                    cost_per_hour_usd = 0.09
+                else:
+                    cost_per_hour_usd = 0.07  # Generic estimate
+                    
+        except Exception as e:
+            logger.error(f"Failed to get location info from ipinfo.io: {e}")
+            
+            # Fallback to basic detection
+            hostname = socket.gethostname()
+            if 'aws' in hostname.lower() or 'ec2' in hostname.lower():
                 provider = "AWS"
-                instance_type = response.text.strip()
-                # Get region
-                region_response = requests.get('http://169.254.169.254/latest/meta-data/placement/region', timeout=2)
-                if region_response.status_code == 200:
-                    region = region_response.text.strip()
-        except:
-            pass
-        
-        # GCP detection
-        try:
-            response = requests.get('http://metadata.google.internal/computeMetadata/v1/instance/machine-type', 
-                                  headers={'Metadata-Flavor': 'Google'}, timeout=2)
-            if response.status_code == 200:
+            elif 'gcp' in hostname.lower() or 'google' in hostname.lower():
                 provider = "GCP"
-                instance_type = response.text.strip().split('/')[-1]
-        except:
-            pass
-        
-        # Azure detection
-        try:
-            response = requests.get('http://169.254.169.254/metadata/instance/compute/vmSize', 
-                                  headers={'Metadata': 'true'}, timeout=2)
-            if response.status_code == 200:
+            elif 'azure' in hostname.lower() or 'microsoft' in hostname.lower():
                 provider = "Azure"
-                instance_type = response.text.strip()
-        except:
-            pass
+            elif 'hetzner' in hostname.lower() or 'hcloud' in hostname.lower():
+                provider = "Hetzner"
         
-        # Cost estimation (simplified)
-        if provider == "AWS" and "p3" in instance_type:
-            cost_per_hour_usd = 3.06  # Example for p3.2xlarge
-        elif provider == "GCP" and "n1" in instance_type:
-            cost_per_hour_usd = 1.50  # Example
+        # Additional cloud metadata detection (fallback for specific clouds)
+        if provider in ["AWS", "GCP", "Azure"]:
+            try:
+                if provider == "AWS":
+                    response = requests.get('http://169.254.169.254/latest/meta-data/instance-type', timeout=2)
+                    if response.status_code == 200:
+                        instance_type = response.text.strip()
+                elif provider == "GCP":
+                    response = requests.get('http://metadata.google.internal/computeMetadata/v1/instance/machine-type', 
+                                          headers={'Metadata-Flavor': 'Google'}, timeout=2)
+                    if response.status_code == 200:
+                        instance_type = response.text.strip().split('/')[-1]
+                elif provider == "Azure":
+                    response = requests.get('http://169.254.169.254/metadata/instance/compute/vmSize', 
+                                          headers={'Metadata': 'true'}, timeout=2)
+                    if response.status_code == 200:
+                        instance_type = response.text.strip()
+            except Exception as e:
+                logger.error(f"Failed to get cloud metadata: {e}")
         
         return {
             "region": region,
@@ -446,6 +543,14 @@ async def report_resources(agent_instance_id: str):
                 "status": status
             }
             
+            logger.info(f"Reporting comprehensive resources: {json.dumps(payload, indent=2)}")
+            response = requests.post(f"{settings.api_server_url}/api/hosts/report", json=payload)
+            response.raise_for_status()
+            logger.info("Successfully reported comprehensive resources.")
+        except Exception as e:
+            logger.error(f"Failed to report resources to API server: {e}")
+
+        await asyncio.sleep(settings.report_interval_seconds)
             logger.info(f"Reporting comprehensive resources: {json.dumps(payload, indent=2)}")
             response = requests.post(f"{settings.api_server_url}/api/hosts/report", json=payload)
             response.raise_for_status()
