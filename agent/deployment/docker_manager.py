@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 async def start_container(instance_data: dict, instance_uuid: str, send_live_update) -> dict:
     """Starts a new GPU-enabled container based on instance_data with live updates."""
     # Build the command to set up SSH access for the user
-    command = f"/bin/bash -c 'mkdir -p /root/.ssh && echo \"{instance_data['user_ssh_key']}\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && while true; do sleep 1000; done'"
+    command = "/bin/bash -c 'mkdir -p /root/.ssh && echo \"" + instance_data['user_ssh_key'] + "\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && while true; do sleep 1000; done'"
     
     await send_live_update("Pulling Docker image...", instance_uuid)
     image_name = instance_data['image_name']
@@ -54,7 +54,7 @@ async def start_rental_container(container_config: dict, rental_id: str, send_li
             command = "/bin/bash -c 'echo root:" + password + " | chpasswd && /usr/sbin/sshd -D'"
         else:  # public_key
             ssh_key = container_config['ssh_key']
-            command = f"/bin/bash -c 'mkdir -p /root/.ssh && echo \"{ssh_key}\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D'"
+            command = "/bin/bash -c 'mkdir -p /root/.ssh && echo \"" + ssh_key + "\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D'"
         
         # Set up environment variables
         env_vars = container_config.get('environment_variables', {})
