@@ -51,7 +51,7 @@ async def start_rental_container(container_config: dict, rental_id: str, send_li
         # Build command based on auth type
         if container_config['auth_type'] == 'password':
             password = container_config['password']
-            command = f"/bin/bash -c 'echo root:{password} | chpasswd && /usr/sbin/sshd -D'"
+            command = "/bin/bash -c 'echo root:" + password + " | chpasswd && /usr/sbin/sshd -D'"
         else:  # public_key
             ssh_key = container_config['ssh_key']
             command = f"/bin/bash -c 'mkdir -p /root/.ssh && echo \"{ssh_key}\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D'"
