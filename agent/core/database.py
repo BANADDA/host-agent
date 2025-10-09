@@ -66,6 +66,10 @@ async def init_database():
 
 async def store_rental_in_db(rental_id: str, rental_request, container_info: Dict[str, Any]):
     """Store rental information in the database."""
+    if db_pool is None:
+        logger.warning("Database not initialized, cannot store rental")
+        raise Exception("Database not initialized")
+    
     try:
         async with db_pool.acquire() as conn:
             expires_at = datetime.now() + timedelta(hours=rental_request.duration_hours)
@@ -103,6 +107,10 @@ async def store_rental_in_db(rental_id: str, rental_request, container_info: Dic
 
 async def get_expired_rentals():
     """Get all expired rentals that need to be terminated."""
+    if db_pool is None:
+        logger.warning("Database not initialized, skipping expired rentals check")
+        return []
+    
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch('''
@@ -134,6 +142,10 @@ async def mark_rental_terminated(rental_id: str):
 
 async def get_active_rentals():
     """Get all active rentals."""
+    if db_pool is None:
+        logger.warning("Database not initialized, cannot get active rentals")
+        return []
+    
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch('''
@@ -151,6 +163,10 @@ async def get_active_rentals():
 
 async def cleanup_database():
     """Clean up database connection."""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+        db_pool = None
     global db_pool
     if db_pool:
         await db_pool.close()
