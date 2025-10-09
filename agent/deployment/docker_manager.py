@@ -1,7 +1,7 @@
 import logging
 import os
-import uuid
 import random
+import uuid
 
 import docker
 
@@ -50,9 +50,11 @@ async def start_rental_container(container_config: dict, rental_id: str, send_li
         
         # Build command based on auth type
         if container_config['auth_type'] == 'password':
-            command = f"/bin/bash -c 'echo root:{container_config[\"password\"]} | chpasswd && /usr/sbin/sshd -D'"
+            password = container_config['password']
+            command = f"/bin/bash -c 'echo root:{password} | chpasswd && /usr/sbin/sshd -D'"
         else:  # public_key
-            command = f"/bin/bash -c 'mkdir -p /root/.ssh && echo \"{container_config[\"ssh_key\"]}\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D'"
+            ssh_key = container_config['ssh_key']
+            command = f"/bin/bash -c 'mkdir -p /root/.ssh && echo \"{ssh_key}\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D'"
         
         # Set up environment variables
         env_vars = container_config.get('environment_variables', {})
