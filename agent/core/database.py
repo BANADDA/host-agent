@@ -167,7 +167,3 @@ async def cleanup_database():
     if db_pool:
         await db_pool.close()
         db_pool = None
-    global db_pool
-    if db_pool:
-        await db_pool.close()
-        db_pool = None
