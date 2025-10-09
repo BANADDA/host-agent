@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: hostagent
+      POSTGRES_USER: hostagent
+      POSTGRES_PASSWORD: hostagent123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hostagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  host-agent:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - API_SERVER_URL=http://66.153.184.209:8000
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=hostagent
+      - POSTGRES_USER=hostagent
+      - POSTGRES_PASSWORD=hostagent123
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  postgres_data:
