@@ -63,7 +63,7 @@ curl -X POST http://your-host-agent:8000/rent \
   "instance_uuid": "550e8400-e29b-41d4-a716-446655440000",
   "status": "creating",
   "message": "Starting container creation...",
-  "container_id": null
+  "container_id": nulll
 }
 ```
 
