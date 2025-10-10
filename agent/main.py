@@ -130,8 +130,8 @@ class TAOLIEHostAgent:
                 else:
                     logger.info(f"Port {port} is available")
     except Exception as e:
-                logger.error(f"Cannot bind to port {port}: {e}")
-                raise
+            logger.error(f"Cannot bind to port {port}: {e}")
+            raise
     
     async def collect_system_info(self):
         """Collect GPU and host information."""
