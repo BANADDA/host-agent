@@ -131,25 +131,32 @@ DB_PASSWORD=$(openssl rand -base64 32)
 # Create database and user (skip if already exists)
 print_status "Setting up PostgreSQL database..."
 
+# Determine how to run postgres commands
+if [[ $EUID -eq 0 ]]; then
+    PG_CMD="su - postgres -c"
+else
+    PG_CMD="sudo -u postgres"
+fi
+
 # Check if database exists
-if $SUDO -u postgres psql -lqt | cut -d \| -f 1 | grep -qw taolie_host_agent; then
+if su - postgres -c "psql -lqt" | cut -d \| -f 1 | grep -qw taolie_host_agent; then
     print_status "Database 'taolie_host_agent' already exists, skipping creation..."
 else
     print_status "Creating database 'taolie_host_agent'..."
-    $SUDO -u postgres psql -c "CREATE DATABASE taolie_host_agent;"
+    su - postgres -c "psql -c \"CREATE DATABASE taolie_host_agent;\""
 fi
 
 # Check if user exists
-if $SUDO -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='agent'" | grep -q 1; then
+if su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='agent'\"" | grep -q 1; then
     print_status "User 'agent' already exists, updating password..."
-    $SUDO -u postgres psql -c "ALTER USER agent WITH PASSWORD '$DB_PASSWORD';"
+    su - postgres -c "psql -c \"ALTER USER agent WITH PASSWORD '$DB_PASSWORD';\""
 else
     print_status "Creating user 'agent'..."
-    $SUDO -u postgres psql -c "CREATE USER agent WITH PASSWORD '$DB_PASSWORD';"
+    su - postgres -c "psql -c \"CREATE USER agent WITH PASSWORD '$DB_PASSWORD';\""
 fi
 
-$SUDO -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE taolie_host_agent TO agent;"
-$SUDO -u postgres psql -c "ALTER USER agent CREATEDB;"
+su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE taolie_host_agent TO agent;\""
+su - postgres -c "psql -c \"ALTER USER agent CREATEDB;\""
 
 # Create configuration file
 print_status "Creating configuration file..."
