@@ -219,7 +219,7 @@ EOF
 
 # Install Python dependencies
 print_status "Installing Python dependencies..."
-pip3 install -r requirements.txt
+pip3 install --break-system-packages -r requirements.txt 2>/dev/null || pip3 install -r requirements.txt
 
 # Create systemd service
 print_status "Creating systemd service..."
