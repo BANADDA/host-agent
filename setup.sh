@@ -43,8 +43,27 @@ print_status "Starting TAOLIE Host Agent installation..."
 print_status "Updating package list..."
 $SUDO apt-get update
 
-# Install required packages
+# Install required packages (only if not already installed)
 print_status "Installing required packages..."
+
+# Check and install PostgreSQL if not present
+if ! command -v psql &> /dev/null; then
+    print_status "Installing PostgreSQL..."
+    $SUDO apt-get install -y postgresql postgresql-contrib
+else
+    print_status "PostgreSQL already installed, skipping..."
+fi
+
+# Check and install Docker if not present
+if ! command -v docker &> /dev/null; then
+    print_status "Installing Docker..."
+    $SUDO apt-get install -y docker.io docker-compose
+else
+    print_status "Docker already installed, skipping..."
+fi
+
+# Install other essential packages if missing
+print_status "Installing other essential packages..."
 $SUDO apt-get install -y \
     curl \
     wget \
@@ -52,22 +71,27 @@ $SUDO apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    postgresql \
-    postgresql-contrib \
-    docker.io \
-    docker-compose \
     ufw \
-    nvidia-container-toolkit
+    unzip \
+    openssl || true
 
-# Start and enable PostgreSQL
-print_status "Starting PostgreSQL service..."
-$SUDO systemctl start postgresql
-$SUDO systemctl enable postgresql
+# Start and enable PostgreSQL (if not already running)
+if systemctl is-active --quiet postgresql; then
+    print_status "PostgreSQL service already running..."
+else
+    print_status "Starting PostgreSQL service..."
+    $SUDO systemctl start postgresql
+    $SUDO systemctl enable postgresql
+fi
 
-# Start and enable Docker
-print_status "Starting Docker service..."
-$SUDO systemctl start docker
-$SUDO systemctl enable docker
+# Start and enable Docker (if not already running)
+if systemctl is-active --quiet docker; then
+    print_status "Docker service already running..."
+else
+    print_status "Starting Docker service..."
+    $SUDO systemctl start docker
+    $SUDO systemctl enable docker
+fi
 
 # Add current user to docker group (skip if root)
 if [[ $EUID -ne 0 ]]; then
@@ -75,11 +99,17 @@ if [[ $EUID -ne 0 ]]; then
     $SUDO usermod -aG docker $USER
 fi
 
-# Create directories
+# Create directories (if not already exist)
 print_status "Creating directories..."
 $SUDO mkdir -p /etc/taolie-host-agent
 $SUDO mkdir -p /var/log/taolie-host-agent
 $SUDO mkdir -p /var/lib/taolie-host-agent
+
+# Backup existing config if present
+if [ -f /etc/taolie-host-agent/config.yaml ]; then
+    print_warning "Existing config.yaml found. Backing up to config.yaml.backup"
+    $SUDO cp /etc/taolie-host-agent/config.yaml /etc/taolie-host-agent/config.yaml.backup
+fi
 
 # Set permissions (skip chown if root)
 if [[ $EUID -ne 0 ]]; then
@@ -98,10 +128,26 @@ cd host-agent-main
 # Generate random password for database
 DB_PASSWORD=$(openssl rand -base64 32)
 
-# Create database and user
+# Create database and user (skip if already exists)
 print_status "Setting up PostgreSQL database..."
-$SUDO -u postgres psql -c "CREATE DATABASE taolie_host_agent;"
-$SUDO -u postgres psql -c "CREATE USER agent WITH PASSWORD '$DB_PASSWORD';"
+
+# Check if database exists
+if $SUDO -u postgres psql -lqt | cut -d \| -f 1 | grep -qw taolie_host_agent; then
+    print_status "Database 'taolie_host_agent' already exists, skipping creation..."
+else
+    print_status "Creating database 'taolie_host_agent'..."
+    $SUDO -u postgres psql -c "CREATE DATABASE taolie_host_agent;"
+fi
+
+# Check if user exists
+if $SUDO -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='agent'" | grep -q 1; then
+    print_status "User 'agent' already exists, updating password..."
+    $SUDO -u postgres psql -c "ALTER USER agent WITH PASSWORD '$DB_PASSWORD';"
+else
+    print_status "Creating user 'agent'..."
+    $SUDO -u postgres psql -c "CREATE USER agent WITH PASSWORD '$DB_PASSWORD';"
+fi
+
 $SUDO -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE taolie_host_agent TO agent;"
 $SUDO -u postgres psql -c "ALTER USER agent CREATEDB;"
 
