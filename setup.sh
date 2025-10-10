@@ -29,21 +29,23 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
+# Check if running as root and set sudo accordingly
 if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root. Please run as a regular user with sudo privileges."
-   exit 1
+   print_warning "Running as root. Will skip sudo commands."
+   SUDO=""
+else
+   SUDO="sudo"
 fi
 
 print_status "Starting TAOLIE Host Agent installation..."
 
 # Update package list
 print_status "Updating package list..."
-sudo apt-get update
+$SUDO apt-get update
 
 # Install required packages
 print_status "Installing required packages..."
-sudo apt-get install -y \
+$SUDO apt-get install -y \
     curl \
     wget \
     git \
@@ -59,28 +61,32 @@ sudo apt-get install -y \
 
 # Start and enable PostgreSQL
 print_status "Starting PostgreSQL service..."
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
+$SUDO systemctl start postgresql
+$SUDO systemctl enable postgresql
 
 # Start and enable Docker
 print_status "Starting Docker service..."
-sudo systemctl start docker
-sudo systemctl enable docker
+$SUDO systemctl start docker
+$SUDO systemctl enable docker
 
-# Add current user to docker group
-print_status "Adding user to docker group..."
-sudo usermod -aG docker $USER
+# Add current user to docker group (skip if root)
+if [[ $EUID -ne 0 ]]; then
+    print_status "Adding user to docker group..."
+    $SUDO usermod -aG docker $USER
+fi
 
 # Create directories
 print_status "Creating directories..."
-sudo mkdir -p /etc/taolie-host-agent
-sudo mkdir -p /var/log/taolie-host-agent
-sudo mkdir -p /var/lib/taolie-host-agent
+$SUDO mkdir -p /etc/taolie-host-agent
+$SUDO mkdir -p /var/log/taolie-host-agent
+$SUDO mkdir -p /var/lib/taolie-host-agent
 
-# Set permissions
-sudo chown -R $USER:$USER /etc/taolie-host-agent
-sudo chown -R $USER:$USER /var/log/taolie-host-agent
-sudo chown -R $USER:$USER /var/lib/taolie-host-agent
+# Set permissions (skip chown if root)
+if [[ $EUID -ne 0 ]]; then
+    $SUDO chown -R $USER:$USER /etc/taolie-host-agent
+    $SUDO chown -R $USER:$USER /var/log/taolie-host-agent
+    $SUDO chown -R $USER:$USER /var/lib/taolie-host-agent
+fi
 
 # Download agent code from GitHub
 print_status "Downloading TAOLIE Host Agent code..."
@@ -94,14 +100,14 @@ DB_PASSWORD=$(openssl rand -base64 32)
 
 # Create database and user
 print_status "Setting up PostgreSQL database..."
-sudo -u postgres psql -c "CREATE DATABASE taolie_host_agent;"
-sudo -u postgres psql -c "CREATE USER agent WITH PASSWORD '$DB_PASSWORD';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE taolie_host_agent TO agent;"
-sudo -u postgres psql -c "ALTER USER agent CREATEDB;"
+$SUDO -u postgres psql -c "CREATE DATABASE taolie_host_agent;"
+$SUDO -u postgres psql -c "CREATE USER agent WITH PASSWORD '$DB_PASSWORD';"
+$SUDO -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE taolie_host_agent TO agent;"
+$SUDO -u postgres psql -c "ALTER USER agent CREATEDB;"
 
 # Create configuration file
 print_status "Creating configuration file..."
-cat > /etc/taolie-host-agent/config.yaml << EOF
+$SUDO tee /etc/taolie-host-agent/config.yaml > /dev/null << EOF
 # TAOLIE Host Agent Configuration
 agent:
   id: ""  # Auto-generated
@@ -159,7 +165,7 @@ pip3 install -r requirements.txt
 
 # Create systemd service
 print_status "Creating systemd service..."
-sudo tee /etc/systemd/system/taolie-host-agent.service > /dev/null << EOF
+$SUDO tee /etc/systemd/system/taolie-host-agent.service > /dev/null << EOF
 [Unit]
 Description=TAOLIE Host Agent
 After=network.target postgresql.service
@@ -185,17 +191,17 @@ EOF
 
 # Copy agent code to system directory
 print_status "Installing agent code..."
-sudo cp -r agent /var/lib/taolie-host-agent/
-sudo cp requirements.txt /var/lib/taolie-host-agent/
-sudo cp config.yaml /var/lib/taolie-host-agent/
+$SUDO cp -r agent /var/lib/taolie-host-agent/
+$SUDO cp requirements.txt /var/lib/taolie-host-agent/
+$SUDO cp config.yaml /var/lib/taolie-host-agent/
 
 # Set permissions
-sudo chown -R root:root /var/lib/taolie-host-agent
-sudo chmod +x /var/lib/taolie-host-agent/agent/main.py
+$SUDO chown -R root:root /var/lib/taolie-host-agent
+$SUDO chmod +x /var/lib/taolie-host-agent/agent/main.py
 
 # Configure log rotation
 print_status "Configuring log rotation..."
-sudo tee /etc/logrotate.d/taolie-host-agent > /dev/null << EOF
+$SUDO tee /etc/logrotate.d/taolie-host-agent > /dev/null << EOF
 /var/log/taolie-host-agent/*.log {
     daily
     missingok
@@ -211,7 +217,7 @@ sudo tee /etc/logrotate.d/taolie-host-agent > /dev/null << EOF
 EOF
 
 # Reload systemd
-sudo systemctl daemon-reload
+$SUDO systemctl daemon-reload
 
 # Clean up
 cd /
@@ -224,11 +230,11 @@ print_warning "2. Set your public IP address"
 print_warning "3. Configure server URL if different"
 
 print_status "To start the agent:"
-print_status "  sudo systemctl start taolie-host-agent"
-print_status "  sudo systemctl enable taolie-host-agent"
+print_status "  $SUDO systemctl start taolie-host-agent"
+print_status "  $SUDO systemctl enable taolie-host-agent"
 
 print_status "To check status:"
-print_status "  sudo systemctl status taolie-host-agent"
+print_status "  $SUDO systemctl status taolie-host-agent"
 
 print_status "To view logs:"
-print_status "  sudo journalctl -u taolie-host-agent -f"
+print_status "  $SUDO journalctl -u taolie-host-agent -f"

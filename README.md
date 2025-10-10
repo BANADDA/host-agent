@@ -27,8 +27,11 @@ A host agent that manages GPU deployments with PostgreSQL database, network conf
 
 #### Linux (Ubuntu/Debian)
 ```bash
-# Download and run the installation script
-curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/setup.sh | sudo bash
+# Download and run the installation script (can be run as root or with sudo)
+curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/setup.sh | bash
+
+# Or with sudo if not running as root:
+# curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/setup.sh | sudo bash
 ```
 
 #### Windows
