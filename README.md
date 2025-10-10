@@ -44,7 +44,7 @@ monitoring:
   duration_check_interval: 30
 
 database:
-  host: "postgres"
+  host: "taolie-postgres"
   port: 5432
   name: "taolie_host_agent"
   user: "agent"
@@ -63,21 +63,27 @@ EOF
 nano config.yaml
 ```
 
-### Step 3: Run PostgreSQL
+### Step 3: Create Docker Network
+
+```bash
+docker network create taolie-network
+```
+
+### Step 4: Run PostgreSQL
 
 ```bash
 docker run -d \
   --name taolie-postgres \
   --restart unless-stopped \
+  --network taolie-network \
   -e POSTGRES_DB=taolie_host_agent \
   -e POSTGRES_USER=agent \
   -e POSTGRES_PASSWORD=your_db_password \
   -v taolie_postgres_data:/var/lib/postgresql/data \
-  -p 5432:5432 \
   postgres:16
 ```
 
-### Step 4: Run Host Agent
+### Step 5: Run Host Agent
 
 ```bash
 docker run -d \
@@ -85,6 +91,7 @@ docker run -d \
   --restart unless-stopped \
   --runtime nvidia \
   --privileged \
+  --network taolie-network \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -96,7 +103,7 @@ docker run -d \
   ghcr.io/banadda/host-agent:latest
 ```
 
-### Step 5: Verify
+### Step 6: Verify
 
 ```bash
 # Check containers

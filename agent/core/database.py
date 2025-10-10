@@ -46,7 +46,7 @@ async def init_database():
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS gpu_status (
                     id SERIAL PRIMARY KEY,
-                    gpu_id VARCHAR(100) NOT NULL,
+                    gpu_id VARCHAR(100) NOT NULL UNIQUE,
                     gpu_uuid VARCHAR(255) UNIQUE,
                     
                     -- GPU Hardware Info
