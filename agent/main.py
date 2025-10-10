@@ -129,9 +129,9 @@ class TAOLIEHostAgent:
                     raise ValueError(f"Port {port} is already in use")
                 else:
                     logger.info(f"Port {port} is available")
-    except Exception as e:
-            logger.error(f"Cannot bind to port {port}: {e}")
-            raise
+            except Exception as e:
+                logger.error(f"Cannot bind to port {port}: {e}")
+                raise
     
     async def collect_system_info(self):
         """Collect GPU and host information."""
@@ -243,7 +243,7 @@ class TAOLIEHostAgent:
                     logger.error(f"Error checking container {deployment['deployment_id']}: {e}")
                     await update_deployment_status(deployment['deployment_id'], 'failed')
                     
-    except Exception as e:
+        except Exception as e:
             logger.error(f"Error in orphaned deployment cleanup: {e}")
     
     async def start_monitoring_threads(self):
