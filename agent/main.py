@@ -13,7 +13,7 @@ from .core.database import (cleanup_database, create_deployment,
                             init_database, store_gpu_metrics, store_gpu_status,
                             store_health_check, update_deployment_status,
                             update_gpu_status)
-from .core.deployment import handle_deploy_command, handle_terminate_command
+from .core.deployment import deploy_container, terminate_deployment
 from .core.hardware import collect_gpu_metrics, get_gpu_info, get_host_info
 from .core.monitoring import (start_command_polling, start_duration_monitor,
                               start_gpu_monitoring, start_health_monitoring,
@@ -118,20 +118,16 @@ class TAOLIEHostAgent:
         ]
         
         for port in ports:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex(('localhost', port))
-                sock.close()
-                
-                if result == 0:
-                    logger.error(f"Port {port} is already in use")
-                    raise ValueError(f"Port {port} is already in use")
-                else:
-                    logger.info(f"Port {port} is available")
-            except Exception as e:
-                logger.error(f"Cannot bind to port {port}: {e}")
-                raise
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('localhost', port))
+            sock.close()
+            
+            if result == 0:
+                logger.error(f"Port {port} is already in use")
+                raise ValueError(f"Port {port} is already in use")
+            else:
+                logger.info(f"Port {port} is available")
     
     async def collect_system_info(self):
         """Collect GPU and host information."""
@@ -214,34 +210,29 @@ class TAOLIEHostAgent:
                 
                 # Check if container still exists
                 import subprocess
-                try:
-                    result = subprocess.run(
-                        ['docker', 'ps', '-a', '--filter', f'name={deployment["deployment_id"]}'],
+                result = subprocess.run(
+                    ['docker', 'ps', '-a', '--filter', f'name={deployment["deployment_id"]}'],
+                    capture_output=True, text=True, timeout=10
+                )
+                
+                if deployment['deployment_id'] in result.stdout:
+                    # Container exists, check if running
+                    running_result = subprocess.run(
+                        ['docker', 'inspect', deployment['deployment_id'], '--format', '{{.State.Running}}'],
                         capture_output=True, text=True, timeout=10
                     )
                     
-                    if deployment['deployment_id'] in result.stdout:
-                        # Container exists, check if running
-                        running_result = subprocess.run(
-                            ['docker', 'inspect', deployment['deployment_id'], '--format', '{{.State.Running}}'],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        
-                        if running_result.stdout.strip() == 'true':
-                            logger.info(f"Resuming monitoring: {deployment['deployment_id']}")
-                        else:
-                            # Container stopped, clean up
-                            subprocess.run(['docker', 'rm', deployment['deployment_id']], timeout=30)
-                            await update_deployment_status(deployment['deployment_id'], 'failed')
-                            logger.info(f"Cleaned up stopped container: {deployment['deployment_id']}")
+                    if running_result.stdout.strip() == 'true':
+                        logger.info(f"Resuming monitoring: {deployment['deployment_id']}")
                     else:
-                        # Container doesn't exist
+                        # Container stopped, clean up
+                        subprocess.run(['docker', 'rm', deployment['deployment_id']], timeout=30)
                         await update_deployment_status(deployment['deployment_id'], 'failed')
-                        logger.info(f"Marked as failed: {deployment['deployment_id']}")
-                        
-                except Exception as e:
-                    logger.error(f"Error checking container {deployment['deployment_id']}: {e}")
+                        logger.info(f"Cleaned up stopped container: {deployment['deployment_id']}")
+                else:
+                    # Container doesn't exist
                     await update_deployment_status(deployment['deployment_id'], 'failed')
+                    logger.info(f"Marked as failed: {deployment['deployment_id']}")
                     
         except Exception as e:
             logger.error(f"Error in orphaned deployment cleanup: {e}")
