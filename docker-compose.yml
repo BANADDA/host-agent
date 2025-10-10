@@ -1,27 +1,50 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: taolie-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taolie_host_agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - taolie-network
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d taolie_host_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   taolie-host-agent:
-    build: .
+    image: ghcr.io/banadda/host-agent:latest
     container_name: taolie-host-agent
     restart: unless-stopped
-    privileged: true  # Required for GPU access
+    privileged: true  # Required for Docker-in-Docker and GPU access
+    runtime: nvidia  # Use NVIDIA runtime for GPU access
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/taolie-host-agent:/etc/taolie-host-agent:ro
-      - /var/log/taolie-host-agent:/var/log/taolie-host-agent
-      - /var/lib/taolie-host-agent:/var/lib/taolie-host-agent
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for managing containers
+      - ./config.yaml:/etc/taolie-host-agent/config.yaml:ro  # Configuration
+      - agent_logs:/var/log/taolie-host-agent  # Logs
+      - agent_data:/var/lib/taolie-host-agent  # Data
     ports:
       - "2222:2222"  # SSH port
-      - "8888:8888"  # Rental port 1
-      - "9999:9999"  # Rental port 2
+      - "8888:8888"  # Service port 1
+      - "9999:9999"  # Service port 2
     networks:
       - taolie-network
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         reservations:
@@ -30,24 +53,13 @@ services:
               count: all
               capabilities: [gpu]
 
-  postgres:
-    image: postgres:15
-    container_name: taolie-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: taolie_host_agent
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taolie_agent_password}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-    networks:
-      - taolie-network
-    ports:
-      - "5432:5432"
-
 volumes:
   postgres_data:
+    driver: local
+  agent_logs:
+    driver: local
+  agent_data:
+    driver: local
 
 networks:
   taolie-network:
