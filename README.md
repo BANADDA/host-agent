@@ -72,9 +72,9 @@ sudo ufw allow 9999/tcp
 
 #### Windows
 ```cmd
-netsh advfirewall firewall add rule name="TAOLIE SSH" dir=in action=allow protocol=TCP localport=2222
-netsh advfirewall firewall add rule name="TAOLIE Port 1" dir=in action=allow protocol=TCP localport=8888
-netsh advfirewall firewall add rule name="TAOLIE Port 2" dir=in action=allow protocol=TCP localport=9999
+netsh advfirewall firewall add rule name="SSH" dir=in action=allow protocol=TCP localport=2222
+netsh advfirewall firewall add rule name="Port 1" dir=in action=allow protocol=TCP localport=8888
+netsh advfirewall firewall add rule name="Port 2" dir=in action=allow protocol=TCP localport=9999
 ```
 
 ### Start the Agent
