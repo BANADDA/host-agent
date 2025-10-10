@@ -1,4 +1,4 @@
-# TAOLIE Host Agent
+# Host Agent
 
 A host agent that manages GPU deployments with PostgreSQL database, network configuration, and comprehensive monitoring.
 
