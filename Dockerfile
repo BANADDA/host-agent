@@ -27,19 +27,13 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
     && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# Create application user
-RUN useradd -m -s /bin/bash taolie-agent
-
 # Create application directories
 RUN mkdir -p /etc/taolie-host-agent \
     && mkdir -p /var/log/taolie-host-agent \
-    && mkdir -p /var/lib/taolie-host-agent \
-    && chown -R taolie-agent:taolie-agent /etc/taolie-host-agent \
-    && chown -R taolie-agent:taolie-agent /var/log/taolie-host-agent \
-    && chown -R taolie-agent:taolie-agent /var/lib/taolie-host-agent
+    && mkdir -p /app
 
 # Set working directory
-WORKDIR /var/lib/taolie-host-agent
+WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -49,13 +43,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY agent/ ./agent/
-COPY config.yaml /etc/taolie-host-agent/config.yaml
-
-# Set proper permissions
-RUN chown -R taolie-agent:taolie-agent /var/lib/taolie-host-agent
-
-# Switch to application user
-USER taolie-agent
 
 # Expose ports (these will be mapped by the host)
 EXPOSE 2222 8888 9999
