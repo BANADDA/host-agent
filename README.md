@@ -18,49 +18,15 @@ Visit your TAOLIE platform and register your host to get your API key.
 ```bash
 mkdir ~/taolie-host-agent && cd ~/taolie-host-agent
 
-# Create config.yaml
-cat > config.yaml << 'EOF'
-agent:
-  id: ""
-  api_key: "YOUR_API_KEY_HERE"
-
-network:
-  public_ip: "YOUR_PUBLIC_IP"
-  ports:
-    ssh: 2222
-    rental_port_1: 8888
-    rental_port_2: 9999
-
-server:
-  base_url: "https://api.taolie.com"
-  timeout: 30
-  retry_attempts: 3
-
-monitoring:
-  gpu_interval: 10
-  health_interval: 60
-  heartbeat_interval: 30
-  command_poll_interval: 10
-  duration_check_interval: 30
-
-database:
-  host: "postgres"
-  port: 5432
-  name: "taolie_host_agent"
-  user: "agent"
-  password: "your_db_password"
-
-gpu:
-  max_temperature: 85
-  max_power: 400
-
-logging:
-  level: "INFO"
-  file: "/var/log/taolie-host-agent/agent.log"
+# Create .env file (required by current image)
+cat > .env << 'EOF'
+API_SERVER_URL=https://api.taolie.com
+AGENT_PORT=8000
+REPORT_INTERVAL_SECONDS=30
 EOF
 
-# Edit with your values
-nano config.yaml
+# Edit .env with your server URL
+nano .env
 ```
 
 ### Step 3: Run PostgreSQL
@@ -85,14 +51,12 @@ docker run -d \
   --restart unless-stopped \
   --runtime nvidia \
   --privileged \
+  --env-file .env \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config.yaml:/etc/taolie-host-agent/config.yaml:ro \
   -v taolie_agent_logs:/var/log/taolie-host-agent \
-  -p 2222:2222 \
-  -p 8888:8888 \
-  -p 9999:9999 \
+  -p 8000:8000 \
   ghcr.io/banadda/host-agent:latest
 ```
 
