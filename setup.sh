@@ -121,8 +121,13 @@ fi
 # Download agent code from GitHub
 print_status "Downloading TAOLIE Host Agent code..."
 cd /tmp
+
+# Clean up any existing downloads
+rm -rf host-agent-main main.zip 2>/dev/null || true
+
+# Download and extract
 wget -q https://github.com/BANADDA/host-agent/archive/main.zip
-unzip -q main.zip
+unzip -oq main.zip  # -o flag overwrites without prompting
 cd host-agent-main
 
 # Generate random password for database
