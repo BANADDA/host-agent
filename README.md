@@ -32,7 +32,7 @@ network:
     rental_port_2: 9999
 
 server:
-  base_url: "https://api.taolie.com"
+  url: "https://api.taolie.com"
   timeout: 30
   retry_attempts: 3
 
