@@ -1,73 +1,390 @@
 # host-agent/agent/main.py
 import asyncio
 import logging
+import os
+import sys
+from datetime import datetime
+from typing import Any, Dict
 
-import uvicorn
-import websockets
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import yaml
 
-from .api.commands import check_expired_rentals
-from .api.commands import router as commands_router
-from .core.config import settings
-from .core.database import cleanup_database, init_database
-from .core.hardware import report_resources
-from .core.state import agent_instance_id, websocket_connections
+from .core.database import (cleanup_database, create_deployment,
+                            get_expired_deployments, get_gpu_status,
+                            init_database, store_gpu_metrics, store_gpu_status,
+                            store_health_check, update_deployment_status,
+                            update_gpu_status)
+from .core.deployment import handle_deploy_command, handle_terminate_command
+from .core.hardware import collect_gpu_metrics, get_gpu_info, get_host_info
+from .core.monitoring import (start_command_polling, start_duration_monitor,
+                              start_gpu_monitoring, start_health_monitoring,
+                              start_health_push, start_heartbeat,
+                              start_metrics_push)
+from .core.registration import register_with_server
 
-logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="Host Agent")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('/var/log/taolie-host-agent/agent.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
-app.include_router(commands_router)
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    websocket_connections[agent_instance_id] = websocket
-    logging.info(f"Agent {agent_instance_id} connected via WebSocket.")
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        if agent_instance_id in websocket_connections:
-            del websocket_connections[agent_instance_id]
-            logging.warning(f"Agent {agent_instance_id} disconnected.")
-    except Exception as e:
-        logging.error(f"WebSocket error for agent {agent_instance_id}: {e}")
-        if agent_instance_id in websocket_connections:
-            del websocket_connections[agent_instance_id]
-
-@app.on_event("startup")
-async def startup_event():
-    logging.info(f"Host Agent {agent_instance_id} starting...")
+class TAOLIEHostAgent:
+    def __init__(self):
+        self.config = None
+        self.agent_id = None
+        self.gpu_uuid = None
+        self.running = False
+        
+    def load_config(self):
+        """Load configuration from YAML file."""
+        config_path = "/etc/taolie-host-agent/config.yaml"
+        if not os.path.exists(config_path):
+            config_path = "config.yaml"  # Fallback for development
+        
+        with open(config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+        
+        logger.info("Configuration loaded successfully")
+        
+    def validate_config(self):
+        """Validate configuration settings."""
+        required_fields = [
+            'agent.api_key',
+            'network.public_ip',
+            'network.ports.ssh',
+            'network.ports.rental_port_1',
+            'network.ports.rental_port_2'
+        ]
+        
+        for field in required_fields:
+            keys = field.split('.')
+            value = self.config
+            for key in keys:
+                if key not in value:
+                    raise ValueError(f"Missing required configuration: {field}")
+                value = value[key]
+            
+            if not value or value == "your-api-key-here" or value == "123.45.67.89":
+                raise ValueError(f"Configuration {field} must be set to a valid value")
+        
+        logger.info("Configuration validation passed")
+        
+    def generate_agent_id(self):
+        """Generate or load agent ID."""
+        if not self.config['agent']['id']:
+            import secrets
+            self.agent_id = f"agent-{secrets.token_hex(6)}"
+            
+            # Update config file
+            self.config['agent']['id'] = self.agent_id
+            config_path = "/etc/taolie-host-agent/config.yaml"
+            if not os.path.exists(config_path):
+                config_path = "config.yaml"
+            
+            with open(config_path, 'w') as f:
+                yaml.dump(self.config, f, default_flow_style=False)
+            
+            logger.info(f"Generated new agent ID: {self.agent_id}")
+        else:
+            self.agent_id = self.config['agent']['id']
+            logger.info(f"Using existing agent ID: {self.agent_id}")
     
-    # Initialize database
-    try:
-        await init_database()
-        logging.info("Database initialized successfully")
-    except Exception as e:
-        logging.error(f"Failed to initialize database: {e}")
-    
-    # Start resource reporting
-    asyncio.create_task(report_resources(agent_instance_id))
-    
-    # Start rental monitoring
-    asyncio.create_task(monitor_rentals())
+    async def test_network_config(self):
+        """Test network configuration and port availability."""
+        import socket
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources when the application shuts down."""
-    logging.info("Host Agent shutting down...")
-    await cleanup_database()
-
-async def monitor_rentals():
-    """Monitor rentals for expiration and auto-termination."""
-    while True:
+        # Test public IP
+        current_ip = None
         try:
-            await check_expired_rentals()
-            # Check every 5 minutes
-            await asyncio.sleep(300)
+            import requests
+            current_ip = requests.get('https://ifconfig.me', timeout=5).text.strip()
+        except:
+            pass
+        
+        configured_ip = self.config['network']['public_ip']
+        if current_ip and current_ip != configured_ip:
+            logger.warning(f"Your current IP ({current_ip}) doesn't match configured IP ({configured_ip})")
+            logger.warning(f"Renters will try to connect to: {configured_ip}")
+        
+        # Test port availability
+        ports = [
+            self.config['network']['ports']['ssh'],
+            self.config['network']['ports']['rental_port_1'],
+            self.config['network']['ports']['rental_port_2']
+        ]
+        
+        for port in ports:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('localhost', port))
+                sock.close()
+                
+                if result == 0:
+                    logger.error(f"Port {port} is already in use")
+                    raise ValueError(f"Port {port} is already in use")
+                else:
+                    logger.info(f"Port {port} is available")
+    except Exception as e:
+                logger.error(f"Cannot bind to port {port}: {e}")
+                raise
+    
+    async def collect_system_info(self):
+        """Collect GPU and host information."""
+        gpu_info = get_gpu_info()
+        host_info = get_host_info()
+        
+        return {
+            'gpu': gpu_info,
+            'host': host_info
+        }
+    
+    async def register_gpu(self):
+        """Register GPU with central server."""
+        # Check if already registered
+        gpu_status = await get_gpu_status()
+        if gpu_status and gpu_status.get('gpu_uuid'):
+            self.gpu_uuid = gpu_status['gpu_uuid']
+            logger.info(f"Already registered with UUID: {self.gpu_uuid}")
+            return
+        
+        # Collect system info
+        system_info = await self.collect_system_info()
+        
+        # Prepare registration payload
+        payload = {
+            "host_agent_id": self.agent_id,
+            "gpu_specs": system_info['gpu'],
+            "host_specs": system_info['host'],
+            "network_config": {
+                "public_ip": self.config['network']['public_ip'],
+                "ssh_port": self.config['network']['ports']['ssh'],
+                "rental_port_1": self.config['network']['ports']['rental_port_1'],
+                "rental_port_2": self.config['network']['ports']['rental_port_2']
+            }
+        }
+        
+        # Register with server
+        result = await register_with_server(self.config, payload)
+        
+        if result['success']:
+            self.gpu_uuid = result['gpu_uuid']
+            
+            # Store in database
+            gpu_data = {
+                'gpu_id': 'gpu-0',
+                'gpu_uuid': self.gpu_uuid,
+                'gpu_name': system_info['gpu']['name'],
+                'total_vram_mb': system_info['gpu']['memory_mb'],
+                'driver_version': system_info['gpu']['driver_version'],
+                'cuda_version': system_info['gpu']['cuda_version'],
+                'public_ip': self.config['network']['public_ip'],
+                'ssh_port': self.config['network']['ports']['ssh'],
+                'rental_port_1': self.config['network']['ports']['rental_port_1'],
+                'rental_port_2': self.config['network']['ports']['rental_port_2'],
+                'status': 'available',
+                'is_healthy': True
+            }
+            
+            await store_gpu_status(gpu_data)
+            
+            # Update config with GPU UUID
+            self.config['gpu']['uuid'] = self.gpu_uuid
+            config_path = "/etc/taolie-host-agent/config.yaml"
+            if not os.path.exists(config_path):
+                config_path = "config.yaml"
+            
+            with open(config_path, 'w') as f:
+                yaml.dump(self.config, f, default_flow_style=False)
+            
+            logger.info(f"Registration successful: {self.gpu_uuid}")
+        else:
+            raise Exception(f"Registration failed: {result.get('error', 'Unknown error')}")
+    
+    async def cleanup_orphaned_deployments(self):
+        """Check for and cleanup orphaned deployments from previous crashes."""
+        try:
+            active_deployments = await get_expired_deployments()
+            for deployment in active_deployments:
+                logger.info(f"Found orphaned deployment: {deployment['deployment_id']}")
+                
+                # Check if container still exists
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        ['docker', 'ps', '-a', '--filter', f'name={deployment["deployment_id"]}'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    
+                    if deployment['deployment_id'] in result.stdout:
+                        # Container exists, check if running
+                        running_result = subprocess.run(
+                            ['docker', 'inspect', deployment['deployment_id'], '--format', '{{.State.Running}}'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        
+                        if running_result.stdout.strip() == 'true':
+                            logger.info(f"Resuming monitoring: {deployment['deployment_id']}")
+                        else:
+                            # Container stopped, clean up
+                            subprocess.run(['docker', 'rm', deployment['deployment_id']], timeout=30)
+                            await update_deployment_status(deployment['deployment_id'], 'failed')
+                            logger.info(f"Cleaned up stopped container: {deployment['deployment_id']}")
+                    else:
+                        # Container doesn't exist
+                        await update_deployment_status(deployment['deployment_id'], 'failed')
+                        logger.info(f"Marked as failed: {deployment['deployment_id']}")
+                        
+                except Exception as e:
+                    logger.error(f"Error checking container {deployment['deployment_id']}: {e}")
+                    await update_deployment_status(deployment['deployment_id'], 'failed')
+                    
+    except Exception as e:
+            logger.error(f"Error in orphaned deployment cleanup: {e}")
+    
+    async def start_monitoring_threads(self):
+        """Start all 7 monitoring threads."""
+        threads = [
+            ("GPU Monitoring", start_gpu_monitoring, self.config['monitoring']['metrics_push_interval']),
+            ("GPU Health Check", start_health_monitoring, self.config['monitoring']['health_push_interval']),
+            ("Heartbeat", start_heartbeat, self.config['monitoring']['heartbeat_interval']),
+            ("Command Polling", start_command_polling, self.config['monitoring']['command_poll_interval']),
+            ("Metrics Push", start_metrics_push, self.config['monitoring']['metrics_push_interval']),
+            ("Health Push", start_health_push, self.config['monitoring']['health_push_interval']),
+            ("Duration Monitor", start_duration_monitor, self.config['monitoring']['duration_check_interval'])
+        ]
+        
+        for name, func, interval in threads:
+            asyncio.create_task(func(self.config, self.agent_id, interval))
+            logger.info(f"{name} thread started")
+    
+    def print_startup_banner(self):
+        """Print the startup banner."""
+        gpu_status = asyncio.run(get_gpu_status())
+        gpu_name = gpu_status.get('gpu_name', 'Unknown') if gpu_status else 'Unknown'
+        vram = gpu_status.get('total_vram_mb', 0) if gpu_status else 0
+        
+        print("")
+        print("┌────────────────────────────────────────────────────────────────┐")
+        print("│                                                                │")
+        print("│  ██████╗ ██████╗ ██╗   ██╗    ██╗  ██╗ ██████╗ ███████╗████████╗│")
+        print("│ ██╔════╝ ██╔══██╗██║   ██║    ██║  ██║██╔═══██╗██╔════╝╚══██╔══╝│")
+        print("│ ██║  ███╗██████╔╝██║   ██║    ███████║██║   ██║███████╗   ██║   │")
+        print("│ ██║   ██║██╔═══╝ ██║   ██║    ██╔══██║██║   ██║╚════██║   ██║   │")
+        print("│ ╚██████╔╝██║     ╚██████╔╝    ██║  ██║╚██████╔╝███████║   ██║   │")
+        print("│  ╚═════╝ ╚═╝      ╚═════╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   │")
+        print("│                                                                │")
+        print("│              GPU Host Agent - Successfully Started             │")
+        print("│                                                                │")
+        print("├────────────────────────────────────────────────────────────────┤")
+        print("│                                                                │")
+        print(f"│  Agent Information:                                            │")
+        print(f"│    • Agent ID:     {self.agent_id:<30} │")
+        print(f"│    • GPU UUID:     {self.gpu_uuid or 'Not registered':<30} │")
+        print("│                                                                │")
+        print(f"│  GPU Details:                                                  │")
+        print(f"│    • Model:        {gpu_name:<30} │")
+        print(f"│    • VRAM:         {vram // 1024} GB{'':<25} │")
+        print("│    • Status:       Available ✓                                 │")
+        print("│    • Health:       Healthy ✓                                   │")
+        print("│                                                                │")
+        print("│  Network Configuration:                                        │")
+        print(f"│    • Public IP:      {self.config['network']['public_ip']:<30} │")
+        print(f"│    • SSH Port:       {self.config['network']['ports']['ssh']:<30} │")
+        print(f"│    • Rental Port 1:  {self.config['network']['ports']['rental_port_1']:<30} │")
+        print(f"│    • Rental Port 2:  {self.config['network']['ports']['rental_port_2']:<30} │")
+        print("│                                                                │")
+        print("│  Monitoring Status:                                            │")
+        print("│    ✓ GPU monitoring active                                     │")
+        print("│    ✓ Health checks running                                     │")
+        print("│    ✓ Connected to central server                               │")
+        print("│    ✓ Ready to accept deployments                               │")
+        print("│                                                                │")
+        print("│  Logs:                                                         │")
+        print("│    tail -f /var/log/gpu-host-agent/agent.log                   │")
+        print("│                                                                │")
+        print("│  Platform Dashboard:                                           │")
+        print("│    https://platform.com/dashboard/host-agents                  │")
+        print("│                                                                │")
+        print("└────────────────────────────────────────────────────────────────┘")
+        print("")
+    
+    async def start(self):
+        """Main startup sequence."""
+        try:
+            logger.info("Starting TAOLIE Host Agent...")
+            
+            # Step 1: Load configuration
+            self.load_config()
+            
+            # Step 2: Validate configuration
+            self.validate_config()
+            
+            # Step 3: Test network configuration
+            await self.test_network_config()
+            
+            # Step 4: Connect to PostgreSQL
+            await init_database()
+            logger.info("Database initialized successfully")
+            
+            # Step 5: Generate or load agent ID
+            self.generate_agent_id()
+            
+            # Step 6: Collect GPU information
+            system_info = await self.collect_system_info()
+            logger.info(f"GPU: {system_info['gpu']['name']}")
+            logger.info(f"VRAM: {system_info['gpu']['memory_mb']} MB")
+            
+            # Step 7: Register with central server
+            await self.register_gpu()
+            
+            # Step 8: Store configuration in PostgreSQL
+            # (Already done in register_gpu)
+            
+            # Step 9: Check for orphaned deployments
+            await self.cleanup_orphaned_deployments()
+            
+            # Step 10: Start monitoring threads
+            await self.start_monitoring_threads()
+            
+            # Print startup banner
+            self.print_startup_banner()
+            
+            self.running = True
+            logger.info("TAOLIE Host Agent started successfully")
+            
+            # Keep the main thread alive
+            while self.running:
+                await asyncio.sleep(1)
+                
         except Exception as e:
-            logging.error(f"Error in rental monitoring: {e}")
-            await asyncio.sleep(60)  # Wait 1 minute before retrying
+            logger.error(f"Failed to start TAOLIE Host Agent: {e}")
+            raise
+    
+    async def stop(self):
+        """Stop the agent gracefully."""
+        logger.info("Stopping TAOLIE Host Agent...")
+        self.running = False
+        await cleanup_database()
+        logger.info("TAOLIE Host Agent stopped")
+
+async def main():
+    """Main entry point."""
+    agent = TAOLIEHostAgent()
+    
+    try:
+        await agent.start()
+    except KeyboardInterrupt:
+        logger.info("Received interrupt signal")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
+    finally:
+        await agent.stop()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=settings.agent_port)
+    asyncio.run(main())

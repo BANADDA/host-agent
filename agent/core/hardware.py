@@ -1,553 +1,289 @@
-import asyncio
-import json
+# host-agent/agent/core/hardware.py
 import logging
-import os
 import platform
-import socket
 import subprocess
-import time
-from datetime import datetime
+from typing import Any, Dict, Optional
 
-import docker
 import psutil
-import requests
-
-from ..api.schemas import InstanceInfo
-from .config import settings
 
 logger = logging.getLogger(__name__)
-client = docker.from_env()
 
-async def get_gpu_info():
-    """Use nvidia-smi to get detailed GPU information."""
+def get_gpu_info() -> Dict[str, Any]:
+    """Collect GPU information using nvidia-smi."""
     try:
-        command = ["nvidia-smi", "--query-gpu=uuid,name,memory.total,memory.used,temperature.gpu,power.draw,power.limit,utilization.gpu,fan.speed", "--format=csv,noheader,nounits"]
-        output = subprocess.check_output(command, encoding='utf-8').strip()
-        gpus = []
-        for line in output.split('\n'):
-            parts = line.split(',')
-            if len(parts) >= 9:
-                uuid, name, total_memory, used_memory, temp, power_usage, power_limit, utilization, fan_speed = parts
-                def safe_int(value):
-                    """Safely convert string to int, handling N/A and [N/A] values."""
-                    value = value.strip()
-                    if value in ['N/A', '[N/A]', '']:
-                        return None
-                    try:
-                        return int(value)
-                    except ValueError:
-                        return None
-                
-                def safe_float(value):
-                    """Safely convert string to float, handling N/A and [N/A] values."""
-                    value = value.strip()
-                    if value in ['N/A', '[N/A]', '']:
-                        return None
-                    try:
-                        return float(value)
-                    except ValueError:
-                        return None
-                
-                gpus.append({
-                    "uuid": uuid.strip(),
-                    "name": name.strip(),
-                    "memory_total_mb": safe_int(total_memory),
-                    "memory_used_mb": safe_int(used_memory),
-                    "temperature_c": safe_int(temp),
-                    "power_usage_w": safe_float(power_usage),
-                    "power_limit_w": safe_float(power_limit),
-                    "utilization_percent": safe_int(utilization),
-                    "fan_speed_percent": safe_int(fan_speed)
-                })
-        return gpus
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        # Get GPU name, memory, UUID, driver version, compute capability
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=name,memory.total,uuid,driver_version,compute_cap',
+            '--format=csv,noheader'
+        ], capture_output=True, text=True, timeout=10)
+        
+        if result.returncode != 0:
+            raise Exception(f"nvidia-smi failed: {result.stderr}")
+        
+        # Parse the output
+        line = result.stdout.strip()
+        if not line:
+            raise Exception("No GPU information returned")
+        
+        parts = [part.strip() for part in line.split(',')]
+        if len(parts) < 5:
+            raise Exception(f"Unexpected nvidia-smi output format: {line}")
+        
+        gpu_name = parts[0]
+        memory_mb = int(parts[1].replace(' MiB', ''))
+        hardware_uuid = parts[2]
+        driver_version = parts[3]
+        compute_capability = parts[4]
+        
+        # Get CUDA version
+        cuda_version = get_cuda_version()
+        
+        return {
+            'name': gpu_name,
+            'memory_mb': memory_mb,
+            'hardware_uuid': hardware_uuid,
+            'driver_version': driver_version,
+            'cuda_version': cuda_version,
+            'compute_capability': compute_capability
+        }
+        
+    except Exception as e:
         logger.error(f"Failed to get GPU info: {e}")
-        return []
+        raise
 
-def get_system_info():
-    """Get comprehensive system information."""
+def get_cuda_version() -> str:
+    """Get CUDA version from nvidia-smi."""
     try:
-        # System info
-        hostname = socket.gethostname()
-        os_info = platform.platform()
-        kernel = platform.release()
-        uptime_seconds = time.time() - psutil.boot_time()
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'
+        ], capture_output=True, text=True, timeout=5)
         
-        # CPU info
-        cpu_model = platform.processor()
-        if not cpu_model or cpu_model == "":
-            # Try to get CPU model from /proc/cpuinfo
-            try:
-                with open('/proc/cpuinfo', 'r') as f:
-                    for line in f:
-                        if line.startswith('model name'):
-                            cpu_model = line.split(':')[1].strip()
-                            break
-            except:
-                cpu_model = "Unknown CPU"
+        if result.returncode == 0:
+            # Try to get CUDA version from nvidia-smi
+            result = subprocess.run([
+                'nvidia-smi'
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'CUDA Version:' in line:
+                        cuda_version = line.split('CUDA Version:')[1].strip().split()[0]
+                        return cuda_version
         
-        cpu_info = {
-            "model": cpu_model,
-            "cores": psutil.cpu_count(logical=False),
-            "threads": psutil.cpu_count(logical=True),
-            "usage_percent": psutil.cpu_percent(interval=1)
-        }
+        # Fallback: try nvcc
+        result = subprocess.run(['nvcc', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if 'release' in line.lower():
+                    # Extract version from "release 12.2, V12.2.140"
+                    version_part = line.split('release')[1].split(',')[0].strip()
+                    return version_part
         
-        # Memory info
-        memory = psutil.virtual_memory()
-        memory_info = {
-            "total_mb": int(memory.total / 1024 / 1024),
-            "used_mb": int(memory.used / 1024 / 1024),
-            "available_mb": int(memory.available / 1024 / 1024)
-        }
+        return "Unknown"
         
-        # Disk info
-        disk = psutil.disk_usage('/')
-        disk_info = {
-            "total_gb": int(disk.total / 1024 / 1024 / 1024),
-            "used_gb": int(disk.used / 1024 / 1024 / 1024),
-            "available_gb": int(disk.free / 1024 / 1024 / 1024)
-        }
+    except Exception as e:
+        logger.warning(f"Could not determine CUDA version: {e}")
+        return "Unknown"
+
+def get_host_info() -> Dict[str, Any]:
+    """Collect host system information."""
+    try:
+        # CPU information
+        cpu_info = platform.processor()
+        if not cpu_info:
+            cpu_info = platform.machine()
+        
+        # RAM information
+        ram_mb = psutil.virtual_memory().total // (1024 * 1024)
+        
+        # OS information
+        os_info = f"{platform.system()} {platform.release()}"
+        
+        # Docker version
+        docker_version = get_docker_version()
         
         return {
-            "hostname": hostname, 
-            "os": os_info,
-            "kernel": kernel,
-            "uptime_seconds": int(uptime_seconds),
-            "cpu": cpu_info,
-            "memory": memory_info,
-            "disk": disk_info
+            'cpu': cpu_info,
+            'ram_mb': ram_mb,
+            'os': os_info,
+            'docker_version': docker_version
         }
+        
     except Exception as e:
-        logger.error(f"Failed to get system info: {e}")
-        return {}
+        logger.error(f"Failed to get host info: {e}")
+        raise
 
-def get_health_info():
-    """Get hardware health information."""
+def get_docker_version() -> str:
+    """Get Docker version."""
     try:
-        # System temperature (if available)
-        system_temp = None
-        try:
-            # Try psutil sensors first (most reliable)
-            if hasattr(psutil, 'sensors_temperatures'):
-                temps = psutil.sensors_temperatures()
-                if temps:
-                    for name, entries in temps.items():
-                        for entry in entries:
-                            if entry.current and entry.current > 0:
-                                system_temp = entry.current
-                                break
-                        if system_temp:
-                            break
-        except Exception as e:
-            logger.error(f"Failed to get temperature via psutil: {e}")
+        result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return "Unknown"
+    except Exception as e:
+        logger.warning(f"Could not get Docker version: {e}")
+        return "Unknown"
+
+def collect_gpu_metrics() -> Dict[str, Any]:
+    """Collect current GPU metrics."""
+    try:
+        # Get GPU utilization, memory usage, temperature, power, fan speed
+        result = subprocess.run([
+            'nvidia-smi', 
+            '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,fan.speed',
+            '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=5)
         
-        if system_temp is None:
-            try:
-                # Try thermal zones
-                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                    temp_millicelsius = int(f.read().strip())
-                    system_temp = temp_millicelsius / 1000
-            except Exception as e:
-                logger.error(f"Failed to read thermal zone: {e}")
-                # Try sensors command if available
-                try:
-                    result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
-                        sensors_data = json.loads(result.stdout)
-                        # Look for CPU temperature
-                        for device, data in sensors_data.items():
-                            if 'Core 0' in data or 'Package id 0' in data:
-                                for key, value in data.items():
-                                    if 'temp1_input' in key or 'Core 0' in key:
-                                        if isinstance(value, (int, float)) and value > 0:
-                                            system_temp = value
-                                            break
-                                if system_temp:
-                                    break
-                except Exception as e2:
-                    logger.error(f"Failed to get temperature via sensors: {e2}")
+        if result.returncode != 0:
+            raise Exception(f"nvidia-smi failed: {result.stderr}")
         
-        # Last reboot time
-        last_reboot = datetime.fromtimestamp(psutil.boot_time()).isoformat() + 'Z'
+        line = result.stdout.strip()
+        if not line:
+            raise Exception("No GPU metrics returned")
+        
+        parts = [part.strip() for part in line.split(',')]
+        if len(parts) < 6:
+            raise Exception(f"Unexpected nvidia-smi output format: {line}")
         
         return {
-            "system_temperature_c": system_temp,
-            "last_reboot": last_reboot
+            'gpu_utilization': float(parts[0]) if parts[0] != 'N/A' else 0.0,
+            'vram_used_mb': int(parts[1]) if parts[1] != 'N/A' else 0,
+            'vram_total_mb': int(parts[2]) if parts[2] != 'N/A' else 0,
+            'temperature_celsius': float(parts[3]) if parts[3] != 'N/A' else 0.0,
+            'power_draw_watts': float(parts[4]) if parts[4] != 'N/A' else 0.0,
+            'fan_speed_percent': float(parts[5]) if parts[5] != 'N/A' else 0.0
         }
+        
     except Exception as e:
-        logger.error(f"Failed to get health info: {e}")
-        return {}
-
-def get_network_info():
-    """Get network and connectivity information."""
-    try:
-        # Public IP (simplified - in production you'd want a more robust method)
-        public_ip = None
-        try:
-            response = requests.get('https://api.ipify.org', timeout=5)
-            public_ip = response.text.strip()
-        except:
-            pass
-        
-        # Network speed test (simplified)
-        bandwidth_mbps = None
-        latency_ms = None
-        try:
-            # Simple latency test
-            start = time.time()
-            socket.create_connection(("8.8.8.8", 53), timeout=5)
-            latency_ms = (time.time() - start) * 1000
-        except:
-            pass
-        
-        # Try to get bandwidth info from system
-        try:
-            # Check if speedtest-cli is available
-            result = subprocess.run(['which', 'speedtest-cli'], capture_output=True, text=True)
-            if result.returncode == 0:
-                # Run a quick speed test
-                speed_result = subprocess.run(['speedtest-cli', '--simple'], capture_output=True, text=True, timeout=30)
-                if speed_result.returncode == 0:
-                    lines = speed_result.stdout.strip().split('\n')
-                    for line in lines:
-                        if 'Download:' in line:
-                            # Extract download speed
-                            parts = line.split()
-                            if len(parts) >= 2:
-                                speed_str = parts[1]
-                                if 'Mbit/s' in speed_str:
-                                    bandwidth_mbps = float(speed_str.replace('Mbit/s', ''))
-                                break
-        except:
-            pass
-        
-        # Internet connectivity
-        internet_connected = False
-        docker_registry_accessible = False
-        try:
-            # Check Docker Hub API (returns 401 but confirms reachability)
-            response = requests.get('https://hub.docker.com/v2/', timeout=5)
-            docker_registry_accessible = response.status_code < 500  # Allow 401/403
-            internet_connected = True
-        except Exception as e:
-            logger.error(f"Failed to check Docker registry accessibility: {e}")
-            # Fallback: just check internet connectivity
-            try:
-                response = requests.get('https://httpbin.org/get', timeout=5)
-                internet_connected = response.status_code == 200
-            except:
-                pass
-        
+        logger.error(f"Failed to collect GPU metrics: {e}")
         return {
-            "public_ip": public_ip,
-            "bandwidth_mbps": bandwidth_mbps,
-            "latency_ms": latency_ms,
-            "internet_connected": internet_connected,
-            "docker_registry_accessible": docker_registry_accessible
+            'gpu_utilization': 0.0,
+            'vram_used_mb': 0,
+            'vram_total_mb': 0,
+            'temperature_celsius': 0.0,
+            'power_draw_watts': 0.0,
+            'fan_speed_percent': 0.0
         }
-    except Exception as e:
-        logger.error(f"Failed to get network info: {e}")
-        return {}
 
-def get_docker_info():
-    """Get Docker environment information."""
+def check_gpu_health() -> Dict[str, Any]:
+    """Perform comprehensive GPU health check."""
+    health_status = {
+        'health_status': 'healthy',
+        'driver_responsive': False,
+        'temperature_normal': False,
+        'power_normal': False,
+        'no_ecc_errors': False,
+        'fan_operational': False,
+        'error_count': 0,
+        'error_message': None
+    }
+    
     try:
-        # Docker version using Python SDK
-        docker_version = None
-        try:
-            docker_version = client.version()['Version']
-        except Exception as e:
-            logger.error(f"Failed to get Docker version: {e}")
-            # Fallback to subprocess if SDK fails
-            try:
-                result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    docker_version = result.stdout.strip()
-            except Exception as e2:
-                logger.error(f"Fallback Docker version check failed: {e2}")
+        # Check 1: Driver responsive
+        result = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            health_status['driver_responsive'] = True
+        else:
+            health_status['error_count'] += 1
+            health_status['error_message'] = "Driver not responsive"
+            
+    except subprocess.TimeoutExpired:
+        health_status['error_count'] += 1
+        health_status['error_message'] = "Driver timeout"
+    except Exception as e:
+        health_status['error_count'] += 1
+        health_status['error_message'] = f"Driver error: {e}"
+    
+    try:
+        # Check 2: Temperature normal
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=2)
         
-        # Container info
-        containers = client.containers.list()
-        containers_running = len([c for c in containers if c.status == 'running'])
-        containers_total = len(containers)
-        
-        # Images count
-        images = client.images.list()
-        images_count = len(images)
-        
-        # Docker disk usage
-        disk_usage = None
-        try:
-            result = subprocess.run(['docker', 'system', 'df', '--format', 'json'], capture_output=True, text=True)
-            if result.returncode == 0:
-                df_data = json.loads(result.stdout)
-                for item in df_data:
-                    if item['Type'] == 'Images':
-                        disk_usage = item['Size']
-        except:
-            # Fallback: try to get disk usage from docker info
-            try:
-                result = subprocess.run(['docker', 'system', 'df'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split('\n')
-                    for line in lines:
-                        if 'Images' in line:
-                            parts = line.split()
-                            if len(parts) >= 3:
-                                disk_usage = parts[2]  # Size column
-                            break
-            except:
-                pass
-        
-        # NVIDIA runtime availability
-        nvidia_runtime_available = False
-        try:
-            result = subprocess.run(['docker', 'info'], capture_output=True, text=True)
-            if result.returncode == 0:
-                nvidia_runtime_available = 'nvidia' in result.stdout.lower()
+        if result.returncode == 0:
+            temp = float(result.stdout.strip())
+            if temp < 85:  # Normal operating temperature
+                health_status['temperature_normal'] = True
             else:
-                logger.error(f"Docker info failed: returncode={result.returncode}, stderr={result.stderr}")
-        except Exception as e:
-            logger.error(f"Failed to check Docker info for NVIDIA runtime: {e}")
-            # Fallback: check if nvidia-smi works
-            try:
-                result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
-                nvidia_runtime_available = result.returncode == 0
-                if result.returncode != 0:
-                    logger.error(f"nvidia-smi failed: returncode={result.returncode}, stderr={result.stderr}")
-            except Exception as e2:
-                logger.error(f"nvidia-smi fallback failed: {e2}")
-        
-        return {
-            "version": docker_version,
-            "containers_running": containers_running,
-            "containers_total": containers_total,
-            "images_count": images_count,
-            "disk_usage_gb": disk_usage,
-            "nvidia_runtime_available": nvidia_runtime_available
-        }
+                health_status['error_count'] += 1
+                health_status['error_message'] = f"Temperature too high: {temp}°C"
+        else:
+            health_status['error_count'] += 1
+            health_status['error_message'] = "Could not read temperature"
+            
     except Exception as e:
-        logger.error(f"Failed to get Docker info: {e}")
-        return {}
-
-def get_location_info():
-    """Get location and provider information."""
+        health_status['error_count'] += 1
+        health_status['error_message'] = f"Temperature check error: {e}"
+    
     try:
-        # Use ipinfo.io for comprehensive location data
-        provider = "unknown"
-        instance_type = "unknown"
-        region = "unknown"
-        cost_per_hour_usd = None
+        # Check 3: Power draw normal
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=power.draw', '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=2)
         
-        try:
-            response = requests.get('https://ipinfo.io/json', timeout=10)
-            if response.status_code == 200:
-                ipinfo_data = response.json()
-                
-                # Extract provider from organization
-                org = ipinfo_data.get('org', '')
-                if 'Hetzner' in org:
-                    provider = "Hetzner"
-                elif 'Amazon' in org or 'AWS' in org:
-                    provider = "AWS"
-                elif 'Google' in org or 'GCP' in org:
-                    provider = "GCP"
-                elif 'Microsoft' in org or 'Azure' in org:
-                    provider = "Azure"
-                elif 'DigitalOcean' in org:
-                    provider = "DigitalOcean"
-                elif 'Linode' in org:
-                    provider = "Linode"
-                elif 'Vultr' in org:
-                    provider = "Vultr"
-                elif 'OVH' in org:
-                    provider = "OVH"
-                else:
-                    # Try to extract provider from org string
-                    org_lower = org.lower()
-                    if 'hetzner' in org_lower:
-                        provider = "Hetzner"
-                    elif 'amazon' in org_lower or 'aws' in org_lower:
-                        provider = "AWS"
-                    elif 'google' in org_lower:
-                        provider = "GCP"
-                    elif 'microsoft' in org_lower or 'azure' in org_lower:
-                        provider = "Azure"
-                    else:
-                        provider = "Other"
-                
-                # Extract region and location info
-                region = ipinfo_data.get('region', 'unknown')
-                city = ipinfo_data.get('city', '')
-                country = ipinfo_data.get('country', '')
-                
-                # Create a more descriptive region
-                if city and country:
-                    region = f"{city}, {country}"
-                elif region != 'unknown':
-                    region = f"{region}, {country}" if country else region
-                
-                # Get hostname for instance type detection
-                hostname = ipinfo_data.get('hostname', '')
-                
-                # Try to detect instance type from hostname patterns
-                if provider == "AWS" and 'ec2' in hostname.lower():
-                    instance_type = "EC2"
-                elif provider == "GCP" and 'compute' in hostname.lower():
-                    instance_type = "Compute Engine"
-                elif provider == "Azure" and 'cloudapp' in hostname.lower():
-                    instance_type = "Virtual Machine"
-                elif provider == "Hetzner":
-                    instance_type = "Cloud Server"
-                else:
-                    instance_type = "Virtual Machine"
-                
-                # Estimate cost based on provider and region
-                if provider == "Hetzner":
-                    cost_per_hour_usd = 0.05  # Approximate for small instances
-                elif provider == "AWS":
-                    if "us-" in region.lower():
-                        cost_per_hour_usd = 0.10
-                    else:
-                        cost_per_hour_usd = 0.12
-                elif provider == "GCP":
-                    cost_per_hour_usd = 0.08
-                elif provider == "Azure":
-                    cost_per_hour_usd = 0.09
-                else:
-                    cost_per_hour_usd = 0.07  # Generic estimate
-                    
-        except Exception as e:
-            logger.error(f"Failed to get location info from ipinfo.io: {e}")
+        if result.returncode == 0:
+            power = float(result.stdout.strip())
+            if power < 500:  # Reasonable power draw
+                health_status['power_normal'] = True
+            else:
+                health_status['error_count'] += 1
+                health_status['error_message'] = f"Power draw too high: {power}W"
+        else:
+            health_status['error_count'] += 1
+            health_status['error_message'] = "Could not read power draw"
             
-            # Fallback to basic detection
-            hostname = socket.gethostname()
-            if 'aws' in hostname.lower() or 'ec2' in hostname.lower():
-                provider = "AWS"
-            elif 'gcp' in hostname.lower() or 'google' in hostname.lower():
-                provider = "GCP"
-            elif 'azure' in hostname.lower() or 'microsoft' in hostname.lower():
-                provider = "Azure"
-            elif 'hetzner' in hostname.lower() or 'hcloud' in hostname.lower():
-                provider = "Hetzner"
-        
-        # Additional cloud metadata detection (fallback for specific clouds)
-        if provider in ["AWS", "GCP", "Azure"]:
-            try:
-                if provider == "AWS":
-                    response = requests.get('http://169.254.169.254/latest/meta-data/instance-type', timeout=2)
-                    if response.status_code == 200:
-                        instance_type = response.text.strip()
-                elif provider == "GCP":
-                    response = requests.get('http://metadata.google.internal/computeMetadata/v1/instance/machine-type', 
-                                          headers={'Metadata-Flavor': 'Google'}, timeout=2)
-                    if response.status_code == 200:
-                        instance_type = response.text.strip().split('/')[-1]
-                elif provider == "Azure":
-                    response = requests.get('http://169.254.169.254/metadata/instance/compute/vmSize', 
-                                          headers={'Metadata': 'true'}, timeout=2)
-                    if response.status_code == 200:
-                        instance_type = response.text.strip()
-            except Exception as e:
-                logger.error(f"Failed to get cloud metadata: {e}")
-        
-        return {
-            "region": region,
-            "datacenter": f"{provider.lower()}-cloud",
-            "provider": provider,
-            "instance_type": instance_type,
-            "cost_per_hour_usd": cost_per_hour_usd
-        }
     except Exception as e:
-        logger.error(f"Failed to get location info: {e}")
-        return {}
-
-def get_status_info():
-    """Get status and alerts information."""
+        health_status['error_count'] += 1
+        health_status['error_message'] = f"Power check error: {e}"
+    
     try:
-        alerts = []
-        overall_status = "healthy"
+        # Check 4: ECC errors
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=ecc.errors.corrected.volatile', '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=2)
         
-        # Check for potential issues
-        try:
-            # Check disk space
-            disk = psutil.disk_usage('/')
-            if disk.percent > 90:
-                alerts.append("High disk usage")
-                overall_status = "warning"
+        if result.returncode == 0:
+            ecc_errors = int(result.stdout.strip())
+            if ecc_errors == 0:
+                health_status['no_ecc_errors'] = True
+            else:
+                health_status['error_count'] += 1
+                health_status['error_message'] = f"ECC errors detected: {ecc_errors}"
+        else:
+            # ECC not supported on consumer GPUs, consider it OK
+            health_status['no_ecc_errors'] = True
             
-            # Check memory usage
-            memory = psutil.virtual_memory()
-            if memory.percent > 90:
-                alerts.append("High memory usage")
-                overall_status = "warning"
-            
-            # Check CPU usage
-            cpu_percent = psutil.cpu_percent(interval=1)
-            if cpu_percent > 95:
-                alerts.append("High CPU usage")
-                overall_status = "warning"
-                
-        except:
-            pass
-        
-        # Maintenance info (placeholder)
-        last_maintenance = "2024-01-10T00:00:00Z"
-        next_maintenance = "2024-02-10T00:00:00Z"
-        
-        return {
-            "overall": overall_status,
-            "alerts": alerts,
-            "last_maintenance": last_maintenance,
-            "next_maintenance": next_maintenance
-        }
     except Exception as e:
-        logger.error(f"Failed to get status info: {e}")
-        return {"overall": "unknown", "alerts": [], "last_maintenance": None, "next_maintenance": None}
-
-def get_running_instances() -> list[InstanceInfo]:
-    """Get a list of containers managed by this agent."""
+        # ECC not supported, consider it OK
+        health_status['no_ecc_errors'] = True
+    
     try:
-        containers = client.containers.list(filters={"name": "rental-instance"})
-        return [InstanceInfo(id=c.id, name=c.name) for c in containers]
+        # Check 5: Fan operational
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=fan.speed', '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=2)
+        
+        if result.returncode == 0:
+            fan_speed = float(result.stdout.strip())
+            if fan_speed > 0:
+                health_status['fan_operational'] = True
+            else:
+                health_status['error_count'] += 1
+                health_status['error_message'] = "Fan not operational"
+        else:
+            health_status['error_count'] += 1
+            health_status['error_message'] = "Could not read fan speed"
+            
     except Exception as e:
-        logger.error(f"Failed to get running containers: {e}")
-        return []
-
-async def report_resources(agent_instance_id: str):
-    """Continuously report comprehensive resources to the central API server."""
-    while True:
-        try:
-            # Gather all monitoring data
-            gpus = await get_gpu_info()
-            instances = get_running_instances()
-            system = get_system_info()
-            health = get_health_info()
-            network = get_network_info()
-            docker_info = get_docker_info()
-            location = get_location_info()
-            status = get_status_info()
-            
-            # Build comprehensive payload
-            payload = {
-                "agent_id": agent_instance_id,
-                "timestamp": datetime.now().isoformat() + 'Z',
-                "gpus": gpus,
-                "instances": instances,
-                "system": system,
-                "health": health,
-                "network": network,
-                "docker": docker_info,
-                "location": location,
-                "status": status
-            }
-            
-            logger.info(f"Reporting comprehensive resources: {json.dumps(payload, indent=2)}")
-            response = requests.post(f"{settings.api_server_url}/api/hosts/report", json=payload)
-            response.raise_for_status()
-            logger.info("Successfully reported comprehensive resources.")
-        except Exception as e:
-            logger.error(f"Failed to report resources to API server: {e}")
-
-        await asyncio.sleep(settings.report_interval_seconds)
+        health_status['error_count'] += 1
+        health_status['error_message'] = f"Fan check error: {e}"
+    
+    # Determine overall health status
+    if health_status['error_count'] == 0:
+        health_status['health_status'] = 'healthy'
+    elif health_status['error_count'] <= 2:
+        health_status['health_status'] = 'warning'
+    else:
+        health_status['health_status'] = 'unhealthy'
+    
+    return health_status

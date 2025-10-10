@@ -1,23 +1,62 @@
-name: CI/CD Pipeline for Host Agent
+name: CI/CD Pipeline for TAOLIE Host Agent
 
 on:
   push:
     branches:
       - main
+      - develop
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   release:
     types: [published]
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run tests
+        run: |
+          # Add your test commands here when you create tests
+          echo "Tests would run here"
+          # pytest tests/ --cov=agent --cov-report=xml
+      
+      - name: Upload coverage
+        if: always
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       
       - name: Convert repository name to lowercase
         id: repo
@@ -30,13 +69,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.repo.outputs.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ steps.repo.outputs.repository }}:${{ github.sha }}
-            ghcr.io/${{ steps.repo.outputs.repository }}:latest
-            ${{ github.ref_name != 'main' && format('ghcr.io/{0}:{1}', steps.repo.outputs.repository, github.ref_name) || '' }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Generate SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ steps.repo.outputs.repository }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          
+      - name: Upload SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json

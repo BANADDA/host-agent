@@ -1,0 +1,64 @@
+# /etc/taolie-host-agent/config.yaml
+
+# Host Agent Configuration
+agent:
+  # Auto-generated on first run, don't modify
+  id: ""  
+  # Your API key from the platform (required)
+  api_key: "your-api-key-here"
+
+# Network Configuration (REQUIRED - User must configure)
+network:
+  # Your public IP address or domain name
+  # This is what renters will connect to
+  public_ip: "123.45.67.89"  # REQUIRED: Set your public IP
+  
+  # Public ports configuration
+  ports:
+    ssh: 2222          # REQUIRED: SSH access to container (for management/debugging)
+    rental_port_1: 8888    # REQUIRED: Primary rental port (e.g., Jupyter, web apps)
+    rental_port_2: 9999    # REQUIRED: Secondary rental port (e.g., API, custom services)
+    
+  # Port descriptions (optional, for documentation)
+  port_descriptions:
+    ssh: "SSH access to deployed containers"
+    rental_port_1: "Primary application port (Jupyter, web interface, etc.)"
+    rental_port_2: "Secondary application port (APIs, services, etc.)"
+
+# Central Server Configuration
+server:
+  url: "https://api.yourplatform.com"
+  timeout: 10
+
+# Monitoring Configuration
+monitoring:
+  heartbeat_interval: 30       # seconds
+  command_poll_interval: 10     # seconds
+  metrics_push_interval: 10     # seconds
+  health_push_interval: 60      # seconds
+  duration_check_interval: 30   # seconds
+
+# Local Database Configuration
+database:
+  host: "localhost"
+  port: 5432
+  name: "taolie_host_agent"
+  user: "agent"
+  password: "auto-generated-on-install"
+
+# GPU Configuration (auto-populated after registration)
+gpu:
+  uuid: ""  # Set after registration with server
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARN, ERROR
+  file: "/var/log/taolie-host-agent/agent.log"
+  max_size_mb: 100
+  max_files: 5
+
+# Optional: Provider Information
+provider:
+  name: ""        # Optional: Your name or company
+  region: ""      # Optional: us-east, eu-west, etc.
+  contact: ""     # Optional: Contact email

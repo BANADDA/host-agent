@@ -1,125 +1,463 @@
-# Host Agent for GPU Rental Platform
+# TAOLIE Host Agent
 
-The Host Agent is a lightweight, containerized service designed to run on physical machines offered by hardware providers. Its primary function is to manage and report the host's resources to a central server, and to provision and terminate rental instances (Docker containers) based on commands from that server.
-
-This README provides an overview of the agent's architecture, its key functionalities, and instructions for building and deploying it using GitHub Actions and the GitHub Container Registry (GHCR).
+A host agent that manages GPU deployments with PostgreSQL database, network configuration, and comprehensive monitoring.
 
 ## Features
 
-- **Resource Reporting**: Automatically detects and reports host hardware specifications (GPUs, memory) to the central server.
-- **Instance Management**: Receives commands from the server to start and terminate isolated, GPU-enabled Docker containers.
-- **Live Feedback**: Communicates real-time deployment and termination status to the server via WebSockets.
-- **Containerized**: Built as a Docker container for easy, consistent, and reliable deployment on any provider machine.
-- **Stateless**: The agent holds minimal in-memory state, relying on the central server's database as the single source of truth.
+- **PostgreSQL Database**: Local database with comprehensive schema for GPU status, deployments, metrics, and health monitoring
+- **Network Configuration**: Configurable public IP and port mapping for SSH and services
+- **7 Monitoring Threads**: GPU monitoring, health checks, heartbeat, command polling, metrics push, health push, and duration monitoring
+- **Docker Integration**: Automated container deployment with GPU access and port mapping
+- **Health Monitoring**: Comprehensive GPU health checks and status reporting
+- **Central Server Integration**: Registration and communication with central platform
+- **Multi-platform Support**: Works on Linux and Windows
+- **Docker Image**: Pre-built containerized version for easy deployment
 
-## Prerequisites
+## Quick Start
 
-- **Docker**: The host machine must have Docker installed.
-- **NVIDIA Container Toolkit**: The host machine must have the NVIDIA Container Toolkit installed to allow Docker containers to access the GPUs.
-- **Unique ID**: The agent requires a unique ID, passed as an environment variable, to identify itself to the central server.
-- **Central Server URL**: The URL of the central API server must be provided as an environment variable.
+### System Requirements
+- Ubuntu 20.04+ or Windows 10/11
+- NVIDIA GPU with CUDA support
+- Docker installed and running
+- PostgreSQL 12+ (auto-installed by setup script)
+- Public IP address or domain name
+- API key from central platform
 
-## Setup and Deployment
+### Installation
 
-This project uses GitHub Actions to automate the build and push of the Docker image to GHCR.
-
-### 1. Build and Push with GitHub Actions
-
-The CI/CD workflow defined in `.github/workflows/ci.yml` is triggered automatically on every push to the `main` branch. It performs the following steps:
-
-1. Builds the Docker image from the `host-agent` directory.
-2. Tags the image with the Git commit SHA and `latest`.
-3. Authenticates with GHCR using a Personal Access Token (PAT) stored as a repository secret.
-4. Pushes the final image to `ghcr.io/<YOUR_GHCR_PATH>`.
-
-### 2. Configure Environment Variables
-
-Before running the agent, you need to set the following environment variables:
-
-- `AGENT_ID`: A unique identifier for this host machine.
-- `API_SERVER_URL`: The full URL of your central server (e.g., `https://api.yourplatform.com`).
-
-Create a `.env` file in the `host-agent` directory for local development, or configure these variables directly in your deployment command.
-
-### 3. Run the Host Agent
-
-On the provider's machine, execute the following command to run the container. This command grants the agent necessary access to the host's Docker socket and GPU resources.
-
+#### Linux (Ubuntu/Debian)
 ```bash
+# Download and run the installation script
+curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/setup.sh | sudo bash
+```
+
+#### Windows
+```cmd
+# Download and run the installation script
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BANADDA/host-agent/main/setup.bat' -OutFile 'setup.bat'; .\setup.bat"
+```
+
+### Configuration
+
+Edit the configuration file:
+```bash
+# Linux
+sudo nano /etc/taolie-host-agent/config.yaml
+
+# Windows
+notepad C:\ProgramData\taolie-host-agent\config.yaml
+```
+
+Required settings:
+```yaml
+agent:
+  api_key: "your-api-key-here"  # Get from central platform
+
+network:
+  public_ip: "21.1.12.69"  # Your public IP or domain
+  ports:
+    ssh: 2222
+    rental_port_1: 8888
+    rental_port_2: 9999
+```
+
+### Firewall Configuration
+
+#### Linux (UFW)
+```bash
+sudo ufw allow 2222/tcp
+sudo ufw allow 8888/tcp
+sudo ufw allow 9999/tcp
+```
+
+#### Windows
+```cmd
+netsh advfirewall firewall add rule name="TAOLIE SSH" dir=in action=allow protocol=TCP localport=2222
+netsh advfirewall firewall add rule name="TAOLIE Port 1" dir=in action=allow protocol=TCP localport=8888
+netsh advfirewall firewall add rule name="TAOLIE Port 2" dir=in action=allow protocol=TCP localport=9999
+```
+
+### Start the Agent
+
+#### Linux
+```bash
+# Start service
+sudo systemctl start taolie-host-agent
+sudo systemctl enable taolie-host-agent
+
+# Check status
+sudo systemctl status taolie-host-agent
+
+# View logs
+sudo journalctl -u taolie-host-agent -f
+```
+
+#### Windows
+```cmd
+# Start agent
+python -m agent.main
+
+# Or use the start script
+start_agent.bat
+```
+
+### Docker Deployment
+
+#### Using Docker Compose
+```bash
+# Download docker-compose.yml and config.yaml
+curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/BANADDA/host-agent/main/config.yaml -o config.yaml
+
+# Edit config.yaml with your settings
+nano config.yaml
+
+# Start with Docker Compose
+docker-compose up -d
+```
+
+#### Using Pre-built Image
+```bash
+# Pull the latest image
+docker pull ghcr.io/BANADDA/host-agent:latest
+
+# Run with GPU support
 docker run -d \
-  --name host-agent \
-  --restart=unless-stopped \
+  --name taolie-host-agent \
   --gpus all \
+  --privileged \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -e API_SERVER_URL="https://your-central-api-server.com" \
-  ghcr.io/<YOUR_GHCR_PATH>:latest
+  -v /etc/taolie-host-agent:/etc/taolie-host-agent:ro \
+  -p 2222:2222 -p 8888:8888 -p 9999:9999 \
+  ghcr.io/BANADDA/host-agent:latest
 ```
 
-## API Endpoints
+## Configuration File
 
-The host agent exposes a minimal API for communication with the central server's scheduler. All endpoints are authenticated and should only be accessed by the trusted central server.
+The configuration file (`config.yaml`) contains all settings for the host agent:
 
-### POST `/start_instance`
+```yaml
+# Host Agent Configuration
+agent:
+  id: ""  # Auto-generated
+  api_key: "your-api-key-here"  # REQUIRED
 
-Starts a new rental instance (Docker container).
+# Network Configuration (REQUIRED)
+network:
+  public_ip: "123.45.67.89"  # REQUIRED
+  ports:
+    ssh: 2222
+    rental_port_1: 8888
+    rental_port_2: 9999
 
-- **Payload**: `InstanceData` schema
-- **Returns**: `{"message": "Instance started successfully", "container_id": "..."}`
+# Central Server Configuration
+server:
+  url: "https://api.yourplatform.com"
+  timeout: 10
 
-### POST `/terminate_instance`
+# Monitoring Configuration
+monitoring:
+  heartbeat_interval: 30
+  command_poll_interval: 10
+  metrics_push_interval: 10
+  health_push_interval: 60
+  duration_check_interval: 30
 
-Terminates a running container instance.
+# Database Configuration
+database:
+  host: "localhost"
+  port: 5432
+  name: "taolie_host_agent"
+  user: "agent"
+  password: "auto-generated"
 
-- **Payload**: `InstanceID` schema
-- **Returns**: `{"message": "Instance terminated successfully"}`
+# GPU Configuration (auto-populated)
+gpu:
+  uuid: ""
 
-### GET `/ws`
+# Logging
+logging:
+  level: "INFO"
+  file: "/var/log/taolie-host-agent/agent.log"
+  max_size_mb: 100
+  max_files: 5
+```
 
-Establishes a WebSocket connection for live status updates during deployment and termination.
+## Database Schema
 
-## Development
+The system uses PostgreSQL with the following main tables:
 
-### Prerequisites
+- **gpu_status**: GPU information and current status
+- **deployments**: Active and historical deployments
+- **gpu_metrics**: Performance metrics over time
+- **gpu_health_history**: Health check results
+- **health_checks**: Deployment-specific health checks
+- **command_queue**: Commands from central server
 
-- Python 3.11+
-- Docker
-- pip and venv
+## Monitoring Threads
 
-### Setup
+The system runs 7 background monitoring threads:
 
-1. Clone the repository:
+1. **GPU Monitoring** (10s): Collects GPU metrics and utilization
+2. **GPU Health Check** (60s): Performs comprehensive health checks
+3. **Heartbeat** (30s): Sends keep-alive to central server
+4. **Command Polling** (10s): Polls for new commands from server
+5. **Metrics Push** (10s): Pushes metrics to central server
+6. **Health Push** (60s): Pushes health status to central server
+7. **Duration Monitor** (30s): Monitors for expired deployments
+
+## Deployment Workflow
+
+### Automatic Deployment
+1. User rents GPU on platform
+2. Platform sends DEPLOY command to agent
+3. Agent validates GPU availability
+4. Agent pulls Docker image
+5. Agent creates container with port mapping
+6. Agent configures SSH and Jupyter access
+7. Agent performs health checks
+8. Agent notifies platform with access information
+
+### Port Mapping
+- **SSH Port (2222)**: Terminal access for management
+- **Rental Port 1 (8888)**: Primary application port (Jupyter, web apps)
+- **Rental Port 2 (9999)**: Secondary application port (APIs, services)
+
+### Access Information
+Users receive:
+- SSH credentials for terminal access
+- Jupyter Lab URL with token
+- Custom application port access
+- Full connection details
+
+## Termination Workflow
+
+### Automatic Termination
+- Duration monitor checks for expired deployments
+- Sends warning to container (30s before expiry)
+- Stops container gracefully
+- Cleans up GPU resources
+- Updates database
+- Notifies central server
+
+### Manual Termination
+- User requests early termination
+- Platform sends TERMINATE command
+- Agent stops container immediately
+- Calculates usage and refund
+- Updates database
+- Notifies central server
+
+## Health Monitoring
+
+The system performs comprehensive health checks:
+
+- **Driver Responsiveness**: Tests nvidia-smi response
+- **Temperature Monitoring**: Checks GPU temperature
+- **Power Monitoring**: Monitors power draw
+- **ECC Error Detection**: Checks for memory errors
+- **Fan Operation**: Verifies fan functionality
+
+## Logging
+
+Logs are written to:
+- **Console**: Real-time status and errors
+- **File**: `/var/log/gpu-host-agent/agent.log`
+- **Systemd Journal**: `journalctl -u gpu-host-agent`
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Port Already in Use**
    ```bash
-   git clone <repository-url>
+   sudo netstat -tuln | grep :2222
+   sudo lsof -i :2222
    ```
 
-2. Navigate to the project:
+2. **Database Connection Failed**
    ```bash
-   cd host-agent
+   sudo systemctl status postgresql
+   sudo -u postgres psql -c "\\l"
    ```
 
-3. Create and activate a virtual environment:
+3. **GPU Not Accessible**
    ```bash
-   python -m venv venv
-   source venv/bin/activate
+   nvidia-smi
+   docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
    ```
 
-4. Install dependencies:
+4. **Container Creation Failed**
    ```bash
-   pip install -r requirements.txt
+   docker images
+   docker pull yourplatform/cuda-template:latest
    ```
 
-### Run Locally
-
-To run the agent locally for development, you can start it directly with uvicorn. Ensure your `.env` file is configured correctly.
+### Log Analysis
 
 ```bash
-uvicorn agent.main:app --reload
+# View real-time logs
+tail -f /var/log/taolie-host-agent/agent.log
+
+# View systemd logs
+journalctl -u taolie-host-agent -f
+
+# Check specific errors
+grep ERROR /var/log/taolie-host-agent/agent.log
 ```
 
-## Contributing
+## API Integration
 
-We welcome contributions! Please open an issue or submit a pull request with any improvements.
+The agent communicates with the central server via REST API:
+
+- **Registration**: `POST /api/host-agents/register`
+- **Heartbeat**: `POST /api/host-agents/{agent_id}/heartbeat`
+- **Commands**: `GET /api/host-agents/{agent_id}/commands`
+- **Metrics**: `POST /api/host-agents/metrics`
+- **Health**: `POST /api/host-agents/health`
+- **Deployments**: `POST /api/deployments/{id}/success`
+
+## Security
+
+- All API communication uses HTTPS
+- Database credentials are auto-generated
+- SSH passwords are randomly generated per deployment
+- Jupyter tokens are cryptographically secure
+- Container isolation with GPU passthrough
+
+## Performance
+
+- **GPU Monitoring**: 10-second intervals
+- **Health Checks**: 60-second intervals
+- **Command Polling**: 10-second intervals
+- **Metrics Storage**: 24-hour retention
+- **Log Rotation**: Daily with 5-day retention
+
+## Technical Workflow
+
+### Agent Registration Process
+```
+1. Collect GPU specs (nvidia-smi)
+2. Collect host specs (CPU, RAM, OS)
+3. Configure network (IP, ports)
+4. Register with central platform
+```
+
+### Deployment Process
+```
+1. Receive DEPLOY command
+2. Validate GPU availability
+3. Pull Docker image
+4. Create container with GPU access
+5. Configure SSH & Jupyter
+6. Perform health checks
+7. Notify platform with access info
+```
+
+### Monitoring & Management
+```
+- GPU metrics collection (10s intervals)
+- Health monitoring (60s intervals)
+- Heartbeat to platform (30s intervals)
+- Command polling (10s intervals)
+- Auto-termination (30s intervals)
+- Resource cleanup
+```
+
+## Advanced Configuration
+
+### Custom Docker Templates
+
+Create your own GPU-enabled containers:
+
+```dockerfile
+# Custom template example
+FROM nvidia/cuda:11.8-devel-ubuntu22.04
+
+# Install your specific tools
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    jupyter \
+    your-custom-tools
+
+# Configure for TAOLIE
+ENV DEPLOYMENT_ID=""
+ENV SSH_USERNAME=""
+ENV SSH_PASSWORD=""
+ENV JUPYTER_TOKEN=""
+
+# Start services
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+```
+
+### Network Security
+
+```yaml
+# Advanced network configuration
+network:
+  public_ip: "your-domain.com"
+  ports:
+    ssh: 2222
+    rental_port_1: 8888
+    rental_port_2: 9999
+  security:
+    enable_ssl: true
+    ssl_cert: "/path/to/cert.pem"
+    ssl_key: "/path/to/key.pem"
+    allowed_ips: ["192.168.1.0/24"]  # Optional IP restrictions
+```
+
+### Monitoring & Alerting
+
+```yaml
+# Enhanced monitoring
+monitoring:
+  gpu_thresholds:
+    temperature_max: 85
+    power_max: 400
+    utilization_min: 5
+  alerts:
+    email: "admin@yourdomain.com"
+    webhook: "https://your-webhook.com/alerts"
+  retention:
+    metrics_days: 30
+    logs_days: 7
+```
+
+## Deployment Strategies
+
+### Single GPU Setup
+```bash
+# One GPU, one agent
+./setup.sh
+sudo systemctl start taolie-host-agent
+```
+
+### Multi-GPU Setup
+```bash
+# Multiple GPUs, multiple agents
+for gpu in 0 1 2 3; do
+  cp config.yaml config-gpu$gpu.yaml
+  # Edit config-gpu$gpu.yaml for each GPU
+  sudo systemctl start taolie-host-agent-gpu$gpu
+done
+```
+
+### Cluster Deployment
+```bash
+# Docker Swarm or Kubernetes
+docker stack deploy -c docker-compose.yml taolie-cluster
+```
+
+## Support
+
+For issues and support:
+1. Check logs: `/var/log/taolie-host-agent/agent.log`
+2. Verify configuration: `config.yaml`
+3. Test network: `curl ifconfig.me`
+4. Check GPU: `nvidia-smi`
+5. Verify Docker: `docker info`
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License.
