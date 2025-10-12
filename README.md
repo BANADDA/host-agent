@@ -22,8 +22,14 @@ curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-
 sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
 
+# Configure Docker to use NVIDIA runtime
+sudo nvidia-ctk runtime configure --runtime=docker
+
 # Restart Docker
 sudo systemctl restart docker
+
+# Verify the configuration
+docker info | grep -i runtime
 ```
 
 ### Step 1: Register and Get API Key
