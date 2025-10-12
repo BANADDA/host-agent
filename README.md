@@ -1,5 +1,4 @@
 # TAOLIE Host Agent
-
 GPU host agent for TAOLIE platform. Manages GPU deployments, monitoring, and container orchestration.
 
 ## Setup
@@ -9,12 +8,34 @@ GPU host agent for TAOLIE platform. Manages GPU deployments, monitoring, and con
 - Docker installed
 - NVIDIA Container Toolkit installed
 
-### Step 1: Register and Get API Key
+**Installing NVIDIA Container Toolkit:**
 
+If you don't have NVIDIA Container Toolkit installed, run these commands:
+
+```bash
+# Add NVIDIA Container Toolkit repository
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+# Install NVIDIA Container Toolkit
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
+# Configure Docker to use NVIDIA runtime
+sudo nvidia-ctk runtime configure --runtime=docker
+
+# Restart Docker
+sudo systemctl restart docker
+
+# Verify the configuration
+docker info | grep -i runtime
+```
+
+### Step 1: Register and Get API Key
 Visit your TAOLIE platform and register your host to get your API key.
 
 ### Step 2: Create Configuration
-
 ```bash
 mkdir ~/taolie-host-agent && cd ~/taolie-host-agent
 
@@ -64,13 +85,11 @@ nano config.yaml
 ```
 
 ### Step 3: Create Docker Network
-
 ```bash
 docker network create taolie-network
 ```
 
 ### Step 4: Run PostgreSQL
-
 ```bash
 docker run -d \
   --name taolie-postgres \
@@ -84,7 +103,6 @@ docker run -d \
 ```
 
 ### Step 5: Run Host Agent
-
 ```bash
 docker run -d \
   --name taolie-host-agent \
@@ -103,8 +121,9 @@ docker run -d \
   ghcr.io/banadda/host-agent:latest
 ```
 
-### Step 6: Verify
+**Note:** If you get an error about "unknown or invalid runtime name: nvidia", you need to install NVIDIA Container Toolkit (see Prerequisites section above).
 
+### Step 6: Verify
 ```bash
 # Check containers
 docker ps
@@ -117,7 +136,6 @@ docker exec taolie-host-agent nvidia-smi
 ```
 
 ## Management
-
 ```bash
 # Stop
 docker stop taolie-host-agent taolie-postgres
@@ -128,7 +146,7 @@ docker start taolie-postgres taolie-host-agent
 # Update
 docker pull ghcr.io/banadda/host-agent:latest
 docker stop taolie-host-agent && docker rm taolie-host-agent
-# Run Step 4 again
+# Run Step 5 again
 
 # Logs
 docker logs taolie-host-agent -f
@@ -138,7 +156,6 @@ docker exec taolie-postgres pg_dump -U agent taolie_host_agent > backup.sql
 ```
 
 ## What It Does
-
 - Monitors GPU health, temperature, and utilization
 - Receives deployment commands from TAOLIE platform  
 - Pulls Docker images and runs containers with GPU access
@@ -148,6 +165,5 @@ docker exec taolie-postgres pg_dump -U agent taolie_host_agent > backup.sql
 - Stores deployment history in PostgreSQL database
 
 ## Image
-
 Pre-built image: `ghcr.io/banadda/host-agent:latest`  
 Auto-built on every push via GitHub Actions
