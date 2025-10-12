@@ -147,12 +147,13 @@ async def start_health_push(config: Dict[str, Any], agent_id: str, interval: int
             
             if gpu_status:
                 # Prepare health payload
+                last_check = gpu_status.get('last_health_check')
                 payload = {
                     'agent_id': agent_id,
                     'gpu_uuid': gpu_status.get('gpu_uuid'),
                     'is_healthy': gpu_status.get('is_healthy', False),
                     'status': gpu_status.get('status', 'unknown'),
-                    'last_health_check': gpu_status.get('last_health_check'),
+                    'last_health_check': last_check.isoformat() if last_check else None,
                     'timestamp': datetime.now().isoformat()
                 }
                 
