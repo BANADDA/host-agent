@@ -113,7 +113,7 @@ docker run -d \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config.yaml:/etc/taolie-host-agent/config.yaml:ro \
+  -v $(pwd)/config.yaml:/etc/taolie-host-agent/config.yaml \
   -v taolie_agent_logs:/var/log/taolie-host-agent \
   -p 2222:2222 \
   -p 8888:8888 \
