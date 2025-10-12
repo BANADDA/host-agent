@@ -253,9 +253,9 @@ class TAOLIEHostAgent:
             asyncio.create_task(func(self.config, self.agent_id, interval))
             logger.info(f"{name} thread started")
     
-    def print_startup_banner(self):
+    async def print_startup_banner(self):
         """Print the startup banner."""
-        gpu_status = asyncio.run(get_gpu_status())
+        gpu_status = await get_gpu_status()
         gpu_name = gpu_status.get('gpu_name', 'Unknown') if gpu_status else 'Unknown'
         vram = gpu_status.get('total_vram_mb', 0) if gpu_status else 0
         
@@ -343,7 +343,7 @@ class TAOLIEHostAgent:
             await self.start_monitoring_threads()
             
             # Print startup banner
-            self.print_startup_banner()
+            await self.print_startup_banner()
             
             self.running = True
             logger.info("TAOLIE Host Agent started successfully")

@@ -37,11 +37,11 @@ server:
   retry_attempts: 3
 
 monitoring:
-  gpu_interval: 10
-  health_interval: 60
-  heartbeat_interval: 30
-  command_poll_interval: 10
-  duration_check_interval: 30
+  heartbeat_interval: 30       # seconds - how often to send heartbeat to server
+  command_poll_interval: 10     # seconds - how often to check for new commands
+  metrics_push_interval: 10     # seconds - how often to push GPU metrics
+  health_push_interval: 60      # seconds - how often to push health status
+  duration_check_interval: 30   # seconds - how often to check deployment duration
 
 database:
   host: "taolie-postgres"
@@ -95,7 +95,7 @@ docker run -d \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config.yaml:/etc/taolie-host-agent/config.yaml:ro \
+  -v $(pwd)/config.yaml:/etc/taolie-host-agent/config.yaml \
   -v taolie_agent_logs:/var/log/taolie-host-agent \
   -p 2222:2222 \
   -p 8888:8888 \
