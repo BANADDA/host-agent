@@ -238,9 +238,11 @@ async def poll_commands(config: Dict[str, Any], agent_id: str) -> list:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('commands', [])
+            commands = data.get('commands', [])
+            logger.debug(f"Poll response: {response.text[:500]}")  # Log first 500 chars
+            return commands
         else:
-            logger.warning(f"Command polling failed: {response.status_code}")
+            logger.warning(f"Command polling failed: {response.status_code} - {response.text[:200]}")
             return []
             
     except Exception as e:
@@ -251,13 +253,14 @@ async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[s
     """Process a command from the central server."""
     try:
         # Log raw command for debugging
-        logger.info(f"Raw command received: {command}")
+        import json
+        logger.info(f"Raw command received: {json.dumps(command, indent=2)}")
         
         command_type = command.get('command_type')  # Fixed: was 'type'
         command_data = command.get('payload', {})   # Fixed: was 'data'
         command_id = command.get('command_id')      # Fixed: was 'id'
         
-        logger.info(f"Processing command: {command_type} - {command_id}")
+        logger.info(f"Processing command: type={command_type}, id={command_id}, keys={list(command.keys())}")
         
         if command_type == 'deploy':  # Fixed: was 'DEPLOY'
             await handle_deploy_command(config, command_data)
