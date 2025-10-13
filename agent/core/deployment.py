@@ -7,8 +7,9 @@ import subprocess
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from .database import (create_deployment, get_gpu_status, store_gpu_metrics,
-                       update_deployment_status, update_gpu_status)
+from .database import (create_deployment, get_deployment, get_gpu_status,
+                       store_gpu_metrics, update_deployment_status,
+                       update_gpu_status)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,15 @@ async def deploy_container(config: Dict[str, Any], deployment_id: str, command_d
     """Deploy a container with the specified configuration."""
     try:
         logger.info(f"Starting deployment: {deployment_id}")
+        
+        # Step 0: Check if this deployment already exists and is running
+        existing_deployment = await get_deployment(deployment_id)
+        if existing_deployment:
+            if existing_deployment['status'] in ['running', 'deploying']:
+                logger.warning(f"Deployment {deployment_id} already exists with status '{existing_deployment['status']}', skipping")
+                return
+            else:
+                logger.info(f"Deployment {deployment_id} exists with status '{existing_deployment['status']}', will retry")
         
         # Extract parameters from command_data
         template_type = command_data.get('template_id', command_data.get('template_type', 'custom'))

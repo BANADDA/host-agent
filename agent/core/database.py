@@ -389,6 +389,29 @@ async def get_active_deployments():
         logger.error(f"Failed to get active deployments: {e}")
         return []
 
+async def get_deployment(deployment_id: str):
+    """Get a deployment by ID."""
+    if db_pool is None:
+        logger.warning("Database not initialized, cannot get deployment")
+        return None
+    
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow('''
+                SELECT deployment_id, gpu_id, template_type, container_id, status,
+                       start_time, end_time, duration_minutes, user_id,
+                       ssh_port, rental_port_1, rental_port_2,
+                       ssh_username, ssh_password, created_at, updated_at
+                FROM deployments 
+                WHERE deployment_id = $1
+            ''', deployment_id)
+            
+            return dict(row) if row else None
+            
+    except Exception as e:
+        logger.error(f"Failed to get deployment: {e}")
+        return None
+
 async def store_gpu_metrics(gpu_id: str, metrics: Dict[str, Any], deployment_id: str = None):
     """Store GPU metrics in the database."""
     if db_pool is None:

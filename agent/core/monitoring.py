@@ -251,6 +251,7 @@ async def poll_commands(config: Dict[str, Any], agent_id: str) -> list:
 
 async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[str, Any]):
     """Process a command from the central server."""
+    command_id = None
     try:
         # Log raw command for debugging
         import json
@@ -270,11 +271,13 @@ async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[s
         else:
             logger.warning(f"Unknown command type: {command_type}")
         
-        # Acknowledge command
-        await acknowledge_command(config, agent_id, command_id)
-        
     except Exception as e:
         logger.error(f"Error processing command: {e}")
+    finally:
+        # Always acknowledge command, even if it failed
+        # This prevents the server from re-sending the same command
+        if command_id:
+            await acknowledge_command(config, agent_id, command_id)
 
 async def handle_deploy_command(config: Dict[str, Any], command_id: str, command_data: Dict[str, Any]):
     """Handle DEPLOY command."""
