@@ -263,7 +263,8 @@ async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[s
         logger.info(f"Processing command: type={command_type}, id={command_id}, keys={list(command.keys())}")
         
         if command_type == 'deploy':  # Fixed: was 'DEPLOY'
-            await handle_deploy_command(config, command_data)
+            # Pass command_id as deployment_id
+            await handle_deploy_command(config, command_id, command_data)
         elif command_type == 'terminate':  # Fixed: was 'TERMINATE'
             await handle_terminate_command(config, command_data)
         else:
@@ -275,19 +276,26 @@ async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[s
     except Exception as e:
         logger.error(f"Error processing command: {e}")
 
-async def handle_deploy_command(config: Dict[str, Any], command_data: Dict[str, Any]):
+async def handle_deploy_command(config: Dict[str, Any], command_id: str, command_data: Dict[str, Any]):
     """Handle DEPLOY command."""
     from .deployment import deploy_container
+
+    # Use command_id as deployment_id
+    deployment_id = command_id
     
-    deployment_id = command_data.get('deployment_id')
-    template_type = command_data.get('template_type')
-    duration_minutes = command_data.get('duration_minutes')
-    user_id = command_data.get('user_id')
+    # Map server payload format to expected format
+    template_type = command_data.get('template_id', command_data.get('template_type', 'custom'))
+    duration_minutes = command_data.get('duration_minutes', 60)  # Default 60 minutes
+    user_id = command_data.get('user_id', 'unknown')
     
+    # Log the full payload for debugging
     logger.info(f"Deploying container: {deployment_id}")
+    logger.info(f"Template: {template_type}, Duration: {duration_minutes}min, User: {user_id}")
+    logger.info(f"Image: {command_data.get('image')}, Container: {command_data.get('container_name')}")
     
     try:
-        await deploy_container(config, deployment_id, template_type, duration_minutes, user_id)
+        # Pass the full command_data so deployment can access image, ports, etc.
+        await deploy_container(config, deployment_id, command_data)
         logger.info(f"Deployment successful: {deployment_id}")
     except Exception as e:
         logger.error(f"Deployment failed: {e}")

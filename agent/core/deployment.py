@@ -12,11 +12,17 @@ from .database import (create_deployment, get_gpu_status, store_gpu_metrics,
 
 logger = logging.getLogger(__name__)
 
-async def deploy_container(config: Dict[str, Any], deployment_id: str, template_type: str, 
-                          duration_minutes: int, user_id: str):
+async def deploy_container(config: Dict[str, Any], deployment_id: str, command_data: Dict[str, Any]):
     """Deploy a container with the specified configuration."""
     try:
         logger.info(f"Starting deployment: {deployment_id}")
+        
+        # Extract parameters from command_data
+        template_type = command_data.get('template_id', command_data.get('template_type', 'custom'))
+        duration_minutes = command_data.get('duration_minutes', 60)
+        user_id = command_data.get('user_id', 'unknown')
+        image = command_data.get('image', 'ubuntu:22.04')
+        container_name = command_data.get('container_name', f'deployment-{deployment_id}')
         
         # Step 1: Validate GPU availability
         gpu_status = await get_gpu_status()
@@ -55,17 +61,17 @@ async def deploy_container(config: Dict[str, Any], deployment_id: str, template_
         )
         
         # Step 3: Pull Docker image
-        image_name = get_docker_image(template_type)
-        await pull_docker_image(image_name)
+        logger.info(f"Pulling Docker image: {image}")
+        await pull_docker_image(image)
         
         # Step 4: Generate credentials
         ssh_username = "gpu-user"
         ssh_password = generate_password(16)
         jupyter_token = generate_token(32)
         
-        # Step 5: Create and start container
+        # Step 5: Create and start container using command_data
         container_id = await create_container(
-            deployment_id, image_name, config, 
+            deployment_id, image, container_name, config, command_data,
             ssh_username, ssh_password, jupyter_token
         )
         
@@ -180,26 +186,51 @@ def generate_token(length: int) -> str:
     characters = string.ascii_letters + string.digits
     return ''.join(secrets.choice(characters) for _ in range(length))
 
-async def create_container(deployment_id: str, image_name: str, config: Dict[str, Any],
+async def create_container(deployment_id: str, image_name: str, container_name: str,
+                          config: Dict[str, Any], command_data: Dict[str, Any],
                           ssh_username: str, ssh_password: str, jupyter_token: str) -> str:
     """Create and start Docker container."""
     try:
         # Build docker run command
         cmd = [
             'docker', 'run', '-d',
-            '--name', deployment_id,
+            '--name', container_name,
             '--gpus', 'all',
             '--shm-size=8g',
-            '--restart=unless-stopped',
-            f"-p {config['network']['ports']['ssh']}:22",
-            f"-p {config['network']['ports']['rental_port_1']}:8888",
-            f"-p {config['network']['ports']['rental_port_2']}:9999",
-            f"-e DEPLOYMENT_ID={deployment_id}",
-            f"-e SSH_USERNAME={ssh_username}",
-            f"-e SSH_PASSWORD={ssh_password}",
-            f"-e JUPYTER_TOKEN={jupyter_token}",
-            image_name
         ]
+        
+        # Add restart policy from command_data or use default
+        restart_policy = command_data.get('restart_policy', 'unless-stopped')
+        cmd.extend(['--restart', restart_policy])
+        
+        # Add port mappings from command_data
+        ports = command_data.get('ports', {})
+        for host_port, container_port in ports.items():
+            cmd.append(f"-p {host_port}:{container_port}")
+        
+        # Add environment variables from command_data
+        env_vars = command_data.get('environment', {})
+        env_vars.update({
+            'DEPLOYMENT_ID': deployment_id,
+            'SSH_USERNAME': ssh_username,
+            'SSH_PASSWORD': ssh_password,
+            'JUPYTER_TOKEN': jupyter_token
+        })
+        for key, value in env_vars.items():
+            cmd.append(f"-e {key}={value}")
+        
+        # Add volumes from command_data
+        volumes = command_data.get('volumes', {})
+        for host_path, container_path in volumes.items():
+            cmd.append(f"-v {host_path}:{container_path}")
+        
+        # Add image
+        cmd.append(image_name)
+        
+        # Add command if specified
+        container_command = command_data.get('command')
+        if container_command:
+            cmd.extend(['bash', '-c', container_command])
         
         logger.info(f"Creating container: {deployment_id}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
