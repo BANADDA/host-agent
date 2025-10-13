@@ -253,90 +253,222 @@ class TAOLIEHostAgent:
             asyncio.create_task(func(self.config, self.agent_id, interval))
             logger.info(f"{name} thread started")
     
-    async def print_startup_banner(self):
-        """Print the beautiful startup banner."""
+    async def generate_dashboard_html(self):
+        """Generate HTML dashboard file."""
         gpu_status = await get_gpu_status()
         gpu_name = gpu_status.get('gpu_name', 'Unknown') if gpu_status else 'Unknown'
         vram = gpu_status.get('total_vram_mb', 0) if gpu_status else 0
         driver = gpu_status.get('driver_version', 'Unknown') if gpu_status else 'Unknown'
         cuda = gpu_status.get('cuda_version', 'Unknown') if gpu_status else 'Unknown'
         
-        # ANSI color codes
-        PURPLE = '\033[95m'
-        CYAN = '\033[96m'
-        GREEN = '\033[92m'
-        YELLOW = '\033[93m'
-        BOLD = '\033[1m'
-        RESET = '\033[0m'
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Taolie Host Agent</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            padding: 20px;
+            line-height: 1.6;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 20px;
+        }}
+        h1 {{
+            color: #00ff88;
+            font-size: 20px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #444;
+            padding-bottom: 10px;
+        }}
+        .section {{
+            margin-bottom: 20px;
+        }}
+        .section-title {{
+            color: #6eb5ff;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }}
+        .info-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }}
+        .info-line {{
+            display: flex;
+            flex-direction: column;
+            padding: 4px 0;
+            font-size: 13px;
+        }}
+        .label {{
+            color: #aaa;
+            margin-bottom: 4px;
+        }}
+        .value {{
+            color: #00ff88;
+        }}
+        @media (max-width: 768px) {{
+            .info-grid {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+        .services {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 8px;
+        }}
+        .service {{
+            color: #00ff88;
+            font-size: 13px;
+        }}
+        .status {{
+            display: inline-block;
+            color: #00ff88;
+            background: rgba(0, 255, 136, 0.1);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TAOLIE HOST AGENT <span class="status">● ONLINE</span></h1>
         
-        print("")
-        print(f"{PURPLE}{'═' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║{BOLD}  ████████╗ █████╗  ██████╗ ██╗     ██╗███████╗                              {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{BOLD}  ╚══██╔══╝██╔══██╗██╔═══██╗██║     ██║██╔════╝                              {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{BOLD}     ██║   ███████║██║   ██║██║     ██║█████╗                                {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{BOLD}     ██║   ██╔══██║██║   ██║██║     ██║██╔══╝                                {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{BOLD}     ██║   ██║  ██║╚██████╔╝███████╗██║███████╗                              {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{BOLD}     ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝╚══════╝                              {RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}██╗  ██╗ ██████╗ ███████╗████████╗     █████╗  ██████╗ ███████╗███████╗████████╗{RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}██║  ██║██╔═══██╗██╔════╝╚══██╔══╝    ██╔══██╗██╔════╝ ██╔════╝██╔════╝╚══██╔══╝{RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}███████║██║   ██║███████╗   ██║       ███████║██║  ███╗█████╗  ███████╗   ██║   {RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}██╔══██║██║   ██║╚════██║   ██║       ██╔══██║██║   ██║██╔══╝  ╚════██║   ██║   {RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}██║  ██║╚██████╔╝███████║   ██║       ██║  ██║╚██████╔╝███████╗███████║   ██║   {RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝   ╚═╝   {RESET}  {PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║{GREEN}{BOLD}                    🚀 Successfully Started & Ready{' ' * 28}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'═' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}{CYAN}💎 Agent Information{RESET}{' ' * 56}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Agent ID:{RESET}      {GREEN}{self.agent_id[:40]:<40}{RESET}      {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}GPU UUID:{RESET}      {GREEN}{(self.gpu_uuid or 'Not registered')[:40]:<40}{RESET}      {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Status:{RESET}        {GREEN}● ONLINE{' ' * 48}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'─' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}{CYAN}🎮 GPU Configuration{RESET}{' ' * 56}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Model:{RESET}         {GREEN}{gpu_name[:45]:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}VRAM:{RESET}          {GREEN}{vram // 1024} GB ({vram} MB){' ' * 40}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Driver:{RESET}        {GREEN}{driver:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}CUDA:{RESET}          {GREEN}{cuda:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Health:{RESET}        {GREEN}✓ Healthy & Available{' ' * 43}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'─' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}{CYAN}🌐 Network Configuration{RESET}{' ' * 52}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Public IP:{RESET}     {GREEN}{self.config['network']['public_ip']:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}SSH Port:{RESET}      {GREEN}{self.config['network']['ports']['ssh']:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Rental Port 1:{RESET} {GREEN}{self.config['network']['ports']['rental_port_1']:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Rental Port 2:{RESET} {GREEN}{self.config['network']['ports']['rental_port_2']:<45}{RESET}     {PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'─' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}{CYAN}📊 Monitoring Services{RESET}{' ' * 54}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║    {GREEN}✓{RESET} GPU Monitoring        {GREEN}✓{RESET} Health Checks          {GREEN}✓{RESET} Heartbeat          {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {GREEN}✓{RESET} Command Polling       {GREEN}✓{RESET} Metrics Push           {GREEN}✓{RESET} Duration Monitor   {PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {GREEN}✓{RESET} Central Server Connected                                              {PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'─' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {BOLD}{CYAN}📝 Quick Actions{RESET}{' ' * 60}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}View Logs:{RESET}         {CYAN}tail -f /var/log/taolie-host-agent/agent.log{' ' * 13}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Check Status:{RESET}      {CYAN}docker logs -f taolie-host-agent{' ' * 25}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║    {YELLOW}Dashboard:{RESET}         {CYAN}https://platform.taolie.com/dashboard{' ' * 20}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'═' * 80}{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}║  {GREEN}{BOLD}🎉 All systems operational - Ready to accept GPU rental requests!{' ' * 13}{RESET}{PURPLE}║{RESET}")
-        print(f"{PURPLE}║{' ' * 78}║{RESET}")
-        print(f"{PURPLE}{'═' * 80}{RESET}")
-        print("")
+        <div class="section">
+            <div class="info-grid">
+                <div class="info-line">
+                    <span class="label">Agent ID:</span>
+                    <span class="value">{self.agent_id}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">GPU UUID:</span>
+                    <span class="value">{self.gpu_uuid or 'Not registered'}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Model:</span>
+                    <span class="value">{gpu_name}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">VRAM:</span>
+                    <span class="value">{vram // 1024} GB ({vram} MB)</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Driver Version:</span>
+                    <span class="value">{driver}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">CUDA Version:</span>
+                    <span class="value">{cuda}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Public IP:</span>
+                    <span class="value">{self.config['network']['public_ip']}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">SSH Port:</span>
+                    <span class="value">{self.config['network']['ports']['ssh']}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Rental Port 1:</span>
+                    <span class="value">{self.config['network']['ports']['rental_port_1']}</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Rental Port 2:</span>
+                    <span class="value">{self.config['network']['ports']['rental_port_2']}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Monitoring Services</div>
+            <div class="services">
+                <div class="service">✓ GPU Monitoring</div>
+                <div class="service">✓ Health Checks</div>
+                <div class="service">✓ Heartbeat</div>
+                <div class="service">✓ Command Polling</div>
+                <div class="service">✓ Metrics Push</div>
+                <div class="service">✓ Duration Monitor</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"""
+        
+        # Write to file
+        dashboard_path = '/var/www/taolie-dashboard.html'
+        try:
+            os.makedirs(os.path.dirname(dashboard_path), exist_ok=True)
+            with open(dashboard_path, 'w') as f:
+                f.write(html_content)
+            logger.info(f"Dashboard generated: {dashboard_path}")
+        except Exception as e:
+            logger.warning(f"Could not write dashboard to {dashboard_path}: {e}")
+            # Fallback to current directory
+            dashboard_path = 'taolie-dashboard.html'
+            with open(dashboard_path, 'w') as f:
+                f.write(html_content)
+            logger.info(f"Dashboard generated: {dashboard_path}")
+    
+    async def print_startup_banner(self):
+        """Print simple startup information and generate HTML dashboard."""
+        gpu_status = await get_gpu_status()
+        gpu_name = gpu_status.get('gpu_name', 'Unknown') if gpu_status else 'Unknown'
+        vram = gpu_status.get('total_vram_mb', 0) if gpu_status else 0
+        driver = gpu_status.get('driver_version', 'Unknown') if gpu_status else 'Unknown'
+        cuda = gpu_status.get('cuda_version', 'Unknown') if gpu_status else 'Unknown'
+        
+        # Generate HTML dashboard
+        await self.generate_dashboard_html()
+        
+        # Print simple banner
+        print("\n" + "="*80)
+        print("TAOLIE HOST AGENT")
+        print("="*80)
+        
+        print("\n[Agent Information]")
+        print(f"  Agent ID:  {self.agent_id}")
+        print(f"  GPU UUID:  {self.gpu_uuid or 'Not registered'}")
+        print(f"  Status:    ONLINE")
+        
+        print("\n[GPU Configuration]")
+        print(f"  Model:     {gpu_name}")
+        print(f"  VRAM:      {vram // 1024} GB ({vram} MB)")
+        print(f"  Driver:    {driver}")
+        print(f"  CUDA:      {cuda}")
+        
+        print("\n[Network Configuration]")
+        print(f"  Public IP:      {self.config['network']['public_ip']}")
+        print(f"  SSH Port:       {self.config['network']['ports']['ssh']}")
+        print(f"  Rental Port 1:  {self.config['network']['ports']['rental_port_1']}")
+        print(f"  Rental Port 2:  {self.config['network']['ports']['rental_port_2']}")
+        
+        print("\n[Monitoring Services]")
+        print("  ✓ GPU Monitoring")
+        print("  ✓ Health Checks")
+        print("  ✓ Heartbeat")
+        print("  ✓ Command Polling")
+        print("  ✓ Metrics Push")
+        print("  ✓ Duration Monitor")
+        
+        print("\n" + "="*80)
+        print("All systems operational - Ready to accept GPU rental requests!")
+        print("="*80 + "\n")
     
     async def start(self):
         """Main startup sequence."""
