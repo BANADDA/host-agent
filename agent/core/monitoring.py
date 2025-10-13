@@ -250,15 +250,15 @@ async def poll_commands(config: Dict[str, Any], agent_id: str) -> list:
 async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[str, Any]):
     """Process a command from the central server."""
     try:
-        command_type = command.get('type')
-        command_data = command.get('data', {})
-        command_id = command.get('id')
+        command_type = command.get('command_type')  # Fixed: was 'type'
+        command_data = command.get('payload', {})   # Fixed: was 'data'
+        command_id = command.get('command_id')      # Fixed: was 'id'
         
         logger.info(f"Processing command: {command_type} - {command_id}")
         
-        if command_type == 'DEPLOY':
+        if command_type == 'deploy':  # Fixed: was 'DEPLOY'
             await handle_deploy_command(config, command_data)
-        elif command_type == 'TERMINATE':
+        elif command_type == 'terminate':  # Fixed: was 'TERMINATE'
             await handle_terminate_command(config, command_data)
         else:
             logger.warning(f"Unknown command type: {command_type}")
