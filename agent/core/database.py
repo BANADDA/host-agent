@@ -24,21 +24,37 @@ def load_config():
         return yaml.safe_load(f)
 
 async def init_database():
-    """Initialize PostgreSQL database connection."""
+    """Initialize PostgreSQL database connection with retry logic."""
     global db_pool
     try:
         config = load_config()
         db_config = config['database']
         
-        db_pool = await asyncpg.create_pool(
-            host=db_config['host'],
-            port=db_config['port'],
-            user=db_config['user'],
-            password=db_config['password'],
-            database=db_config['name'],
-            min_size=1,
-            max_size=10
-        )
+        # Retry connection with exponential backoff (for PostgreSQL container startup)
+        max_retries = 5
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                db_pool = await asyncpg.create_pool(
+                    host=db_config['host'],
+                    port=db_config['port'],
+                    user=db_config['user'],
+                    password=db_config['password'],
+                    database=db_config['name'],
+                    min_size=1,
+                    max_size=10,
+                    timeout=10
+                )
+                logger.info(f"Database connection established on attempt {attempt + 1}")
+                break
+            except (asyncpg.PostgresError, OSError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Database connection attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise  # Re-raise on final attempt
         
         # Create tables with new schema
         async with db_pool.acquire() as conn:
