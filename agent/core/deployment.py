@@ -22,7 +22,8 @@ async def deploy_container(config: Dict[str, Any], deployment_id: str, command_d
         duration_minutes = command_data.get('duration_minutes', 60)
         user_id = command_data.get('user_id', 'unknown')
         image = command_data.get('image', 'ubuntu:22.04')
-        container_name = command_data.get('container_name', f'deployment-{deployment_id}')
+        # Use deployment_id for unique container name to avoid conflicts
+        container_name = f'deployment-{deployment_id}'
         
         # Step 1: Validate GPU availability
         gpu_status = await get_gpu_status()
