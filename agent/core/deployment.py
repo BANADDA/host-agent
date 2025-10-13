@@ -70,7 +70,7 @@ async def deploy_container(config: Dict[str, Any], deployment_id: str, command_d
         jupyter_token = generate_token(32)
         
         # Step 5: Create and start container using command_data
-        container_id = await create_container(
+        container_id, port_mappings = await create_container(
             deployment_id, image, container_name, config, command_data,
             ssh_username, ssh_password, jupyter_token
         )
@@ -88,9 +88,9 @@ async def deploy_container(config: Dict[str, Any], deployment_id: str, command_d
             ssh_password=ssh_password
         )
         
-        # Step 9: Notify central server
+        # Step 9: Notify central server with actual port mappings
         await notify_deployment_success(config, deployment_id, container_id, 
-                                       ssh_username, ssh_password, jupyter_token)
+                                       ssh_username, ssh_password, jupyter_token, port_mappings)
         
         logger.info(f"Deployment successful: {deployment_id}")
         
@@ -204,9 +204,16 @@ async def create_container(deployment_id: str, image_name: str, container_name: 
         cmd.extend(['--restart', restart_policy])
         
         # Add port mappings from command_data
+        # Use dynamic port allocation to avoid conflicts
         ports = command_data.get('ports', {})
-        for host_port, container_port in ports.items():
-            cmd.extend(['-p', f"{host_port}:{container_port}"])
+        port_mappings = {}
+        for requested_port, container_port in ports.items():
+            # Allocate a random port in range 30000-39999
+            import random
+            allocated_port = random.randint(30000, 39999)
+            cmd.extend(['-p', f"{allocated_port}:{container_port}"])
+            port_mappings[container_port] = allocated_port
+            logger.info(f"Allocated host port {allocated_port} for container port {container_port}")
         
         # Add environment variables from command_data
         env_vars = command_data.get('environment', {})
@@ -244,7 +251,7 @@ async def create_container(deployment_id: str, image_name: str, container_name: 
         # Wait for container to be ready
         await asyncio.sleep(10)
         
-        return container_id
+        return container_id, port_mappings
         
     except subprocess.TimeoutExpired:
         raise Exception("Container creation timeout")
@@ -398,7 +405,7 @@ async def cleanup_failed_deployment(deployment_id: str):
         logger.error(f"Failed deployment cleanup error: {e}")
 
 async def notify_deployment_success(config: Dict[str, Any], deployment_id: str, container_id: str,
-                                  ssh_username: str, ssh_password: str, jupyter_token: str):
+                                  ssh_username: str, ssh_password: str, jupyter_token: str, port_mappings: Dict[str, int]):
     """Notify central server of successful deployment."""
     try:
         import requests
@@ -409,6 +416,9 @@ async def notify_deployment_success(config: Dict[str, Any], deployment_id: str, 
             'Content-Type': 'application/json'
         }
         
+        # Get the SSH port from port_mappings (container port 22)
+        ssh_port = port_mappings.get('22', port_mappings.get(22, config['network']['ports']['ssh']))
+        
         payload = {
             'deployment_id': deployment_id,
             'status': 'running',
@@ -417,11 +427,12 @@ async def notify_deployment_success(config: Dict[str, Any], deployment_id: str, 
                 'public_ip': config['network']['public_ip'],
                 'ssh': {
                     'host': config['network']['public_ip'],
-                    'port': config['network']['ports']['ssh'],
+                    'port': ssh_port,
                     'username': ssh_username,
                     'password': ssh_password,
-                    'command': f"ssh {ssh_username}@{config['network']['public_ip']} -p {config['network']['ports']['ssh']}"
+                    'command': f"ssh {ssh_username}@{config['network']['public_ip']} -p {ssh_port}"
                 },
+                'port_mappings': port_mappings,  # Include all actual port mappings
                 'rental_ports': {
                     'port_1': {
                         'port': config['network']['ports']['rental_port_1'],
