@@ -250,6 +250,9 @@ async def poll_commands(config: Dict[str, Any], agent_id: str) -> list:
 async def process_command(config: Dict[str, Any], agent_id: str, command: Dict[str, Any]):
     """Process a command from the central server."""
     try:
+        # Log raw command for debugging
+        logger.info(f"Raw command received: {command}")
+        
         command_type = command.get('command_type')  # Fixed: was 'type'
         command_data = command.get('payload', {})   # Fixed: was 'data'
         command_id = command.get('command_id')      # Fixed: was 'id'
