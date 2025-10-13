@@ -282,7 +282,7 @@ async def store_gpu_status(gpu_data: Dict[str, Any]):
         raise
 
 async def create_deployment(deployment_data: Dict[str, Any]):
-    """Create a new deployment record."""
+    """Create a new deployment record (idempotent - updates if exists)."""
     if db_pool is None:
         logger.warning("Database not initialized, cannot create deployment")
         raise Exception("Database not initialized")
@@ -295,6 +295,9 @@ async def create_deployment(deployment_data: Dict[str, Any]):
                     start_time, duration_minutes, user_id,
                     ssh_port, rental_port_1, rental_port_2
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (deployment_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    updated_at = NOW()
             ''', 
                 deployment_data['deployment_id'],
                 deployment_data['gpu_id'],
