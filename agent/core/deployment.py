@@ -206,7 +206,7 @@ async def create_container(deployment_id: str, image_name: str, container_name: 
         # Add port mappings from command_data
         ports = command_data.get('ports', {})
         for host_port, container_port in ports.items():
-            cmd.append(f"-p {host_port}:{container_port}")
+            cmd.extend(['-p', f"{host_port}:{container_port}"])
         
         # Add environment variables from command_data
         env_vars = command_data.get('environment', {})
@@ -217,12 +217,12 @@ async def create_container(deployment_id: str, image_name: str, container_name: 
             'JUPYTER_TOKEN': jupyter_token
         })
         for key, value in env_vars.items():
-            cmd.append(f"-e {key}={value}")
+            cmd.extend(['-e', f"{key}={value}"])
         
         # Add volumes from command_data
         volumes = command_data.get('volumes', {})
         for host_path, container_path in volumes.items():
-            cmd.append(f"-v {host_path}:{container_path}")
+            cmd.extend(['-v', f"{host_path}:{container_path}"])
         
         # Add image
         cmd.append(image_name)

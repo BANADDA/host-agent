@@ -16,6 +16,8 @@ async def register_with_server(config: Dict[str, Any], payload: Dict[str, Any]) 
         }
         
         logger.info("Registering with central server...")
+        logger.info(f"Registration URL: {url}")
+        logger.info(f"Payload: host_agent_id={payload.get('host_agent_id')}")
         
         response = requests.post(
             url,
@@ -23,6 +25,8 @@ async def register_with_server(config: Dict[str, Any], payload: Dict[str, Any]) 
             headers=headers,
             timeout=config['server']['timeout']
         )
+        
+        logger.info(f"Registration response status: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
@@ -44,7 +48,7 @@ async def register_with_server(config: Dict[str, Any], payload: Dict[str, Any]) 
             }
             
         elif response.status_code == 401:
-            logger.error("Invalid API key")
+            logger.error(f"Invalid API key - Server response: {response.text}")
             return {
                 'success': False,
                 'error': 'Invalid API key'
