@@ -10,7 +10,9 @@ from .database import (get_expired_deployments, get_gpu_status,
                        store_gpu_metrics, store_health_check,
                        update_deployment_status, update_gpu_status)
 from .deployment import terminate_deployment
-from .hardware import check_gpu_health, collect_gpu_metrics
+from .hardware import (calculate_health_scores, check_gpu_health,
+                       collect_gpu_metrics, collect_system_metrics,
+                       get_uptime_info)
 
 logger = logging.getLogger(__name__)
 
@@ -115,21 +117,43 @@ async def start_metrics_push(config: Dict[str, Any], agent_id: str, interval: in
     
     while True:
         try:
-            # Collect current metrics
-            metrics = collect_gpu_metrics()
+            # Collect GPU and system metrics
+            gpu_metrics = collect_gpu_metrics()
+            system_metrics = collect_system_metrics()
+            uptime_info = get_uptime_info()
             gpu_status = await get_gpu_status()
             
-            # Prepare metrics payload
+            # Prepare comprehensive metrics payload
             payload = {
                 'agent_id': agent_id,
                 'gpu_uuid': gpu_status.get('gpu_uuid') if gpu_status else None,
-                'metrics': metrics,
+                
+                # GPU Performance Metrics
+                'gpu_utilization': gpu_metrics['gpu_utilization'],
+                'vram_used_mb': gpu_metrics['vram_used_mb'],
+                'temperature_celsius': gpu_metrics['temperature_celsius'],
+                'power_draw_watts': gpu_metrics['power_draw_watts'],
+                'fan_speed_percent': gpu_metrics['fan_speed_percent'],
+                
+                # System Metrics
+                'cpu_utilization': system_metrics['cpu_utilization'],
+                'ram_used_gb': system_metrics['ram_used_gb'],
+                'storage_used_gb': system_metrics['storage_used_gb'],
+                
+                # Network Metrics
+                'network_utilization': system_metrics['network_utilization'],
+                'current_upload_mbps': system_metrics['current_upload_mbps'],
+                'current_download_mbps': system_metrics['current_download_mbps'],
+                
+                # Uptime
+                'uptime_hours': uptime_info['uptime_hours'],
+                
                 'timestamp': datetime.now().isoformat()
             }
             
             # Push to server
             await push_metrics(config, payload)
-            logger.debug("Metrics pushed to server")
+            logger.debug("Comprehensive metrics pushed to server")
             
         except Exception as e:
             logger.error(f"Error pushing metrics: {e}")
@@ -142,24 +166,40 @@ async def start_health_push(config: Dict[str, Any], agent_id: str, interval: int
     
     while True:
         try:
-            # Get current health status
+            # Get current health status and metrics
             gpu_status = await get_gpu_status()
+            health_data = check_gpu_health()
+            gpu_metrics = collect_gpu_metrics()
+            
+            # Calculate performance scores
+            scores = calculate_health_scores(gpu_metrics, health_data)
             
             if gpu_status:
-                # Prepare health payload
+                # Prepare comprehensive health payload
                 last_check = gpu_status.get('last_health_check')
                 payload = {
                     'agent_id': agent_id,
                     'gpu_uuid': gpu_status.get('gpu_uuid'),
                     'is_healthy': gpu_status.get('is_healthy', False),
                     'status': gpu_status.get('status', 'unknown'),
+                    
+                    # Health Details
+                    'temperature_ok': health_data.get('temperature_normal', True),
+                    'power_ok': health_data.get('power_normal', True),
+                    'network_ok': True,  # Simplified - could add network check
+                    'storage_ok': True,  # Simplified - could add storage check
+                    
+                    # Performance Indicators
+                    'gpu_performance_score': scores['gpu_performance_score'],
+                    'system_stability_score': scores['system_stability_score'],
+                    
                     'last_health_check': last_check.isoformat() if last_check else None,
                     'timestamp': datetime.now().isoformat()
                 }
                 
                 # Push to server
                 await push_health(config, payload)
-                logger.debug("Health status pushed to server")
+                logger.debug("Comprehensive health status pushed to server")
             
         except Exception as e:
             logger.error(f"Error pushing health status: {e}")

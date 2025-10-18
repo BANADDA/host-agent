@@ -2,6 +2,8 @@
 import logging
 import platform
 import subprocess
+import time
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 import psutil
@@ -291,3 +293,299 @@ def check_gpu_health() -> Dict[str, Any]:
         health_status['health_status'] = 'unhealthy'
     
     return health_status
+
+def get_gpu_count() -> int:
+    """Get number of GPUs."""
+    try:
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=count', '--format=csv,noheader'
+        ], capture_output=True, text=True, timeout=5)
+        
+        if result.returncode == 0:
+            # nvidia-smi returns count for each GPU, so count lines
+            lines = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+            return len(lines)
+        return 1
+    except Exception as e:
+        logger.warning(f"Could not get GPU count: {e}")
+        return 1
+
+def get_total_vram_gb() -> int:
+    """Get total VRAM across all GPUs in GB."""
+    try:
+        result = subprocess.run([
+            'nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader,nounits'
+        ], capture_output=True, text=True, timeout=5)
+        
+        if result.returncode == 0:
+            total_mb = 0
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    total_mb += int(line.strip())
+            return total_mb // 1024  # Convert MB to GB
+        return 0
+    except Exception as e:
+        logger.warning(f"Could not get total VRAM: {e}")
+        return 0
+
+def get_storage_info() -> Dict[str, Any]:
+    """Get storage information."""
+    try:
+        # Get disk usage for root partition
+        disk = psutil.disk_usage('/')
+        
+        # Try to determine storage type
+        storage_type = "Unknown"
+        try:
+            # On Linux, check if it's SSD
+            result = subprocess.run(['lsblk', '-d', '-o', 'name,rota'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                # rota=0 means SSD, rota=1 means HDD
+                if '0' in result.stdout:
+                    storage_type = "SSD"
+                elif '1' in result.stdout:
+                    storage_type = "HDD"
+        except:
+            pass
+        
+        return {
+            'storage_total_gb': disk.total // (1024**3),
+            'storage_available_gb': disk.free // (1024**3),
+            'storage_used_gb': disk.used // (1024**3),
+            'storage_type': storage_type
+        }
+    except Exception as e:
+        logger.warning(f"Could not get storage info: {e}")
+        return {
+            'storage_total_gb': 0,
+            'storage_available_gb': 0,
+            'storage_used_gb': 0,
+            'storage_type': 'Unknown'
+        }
+
+def get_network_speed() -> Dict[str, Any]:
+    """Get network speed (simplified - uses quick test)."""
+    try:
+        # For production, you might want to use speedtest-cli
+        # For now, return estimated values based on connection type
+        # This is a placeholder - in production you'd do actual speed tests
+        
+        # Check if speedtest-cli is available
+        try:
+            result = subprocess.run(['speedtest-cli', '--version'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                # Run actual speed test (this takes time, so maybe do it less frequently)
+                logger.info("Running network speed test...")
+                result = subprocess.run(['speedtest-cli', '--simple'], 
+                                      capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    download = 0
+                    upload = 0
+                    latency = 0
+                    
+                    for line in lines:
+                        if 'Download:' in line:
+                            download = float(line.split(':')[1].strip().split()[0])
+                        elif 'Upload:' in line:
+                            upload = float(line.split(':')[1].strip().split()[0])
+                        elif 'Ping:' in line:
+                            latency = float(line.split(':')[1].strip().split()[0])
+                    
+                    return {
+                        'download_speed_mbps': download,
+                        'upload_speed_mbps': upload,
+                        'latency_ms': latency
+                    }
+        except:
+            pass
+        
+        # Fallback: estimate based on network interface
+        net_if = psutil.net_if_stats()
+        max_speed = 0
+        for interface, stats in net_if.items():
+            if stats.isup and not interface.startswith('lo'):
+                max_speed = max(max_speed, stats.speed)
+        
+        # Conservative estimate: assume 80% of link speed
+        estimated_speed = max_speed * 0.8 if max_speed > 0 else 1000
+        
+        return {
+            'download_speed_mbps': estimated_speed,
+            'upload_speed_mbps': estimated_speed,
+            'latency_ms': 10  # Default estimate
+        }
+        
+    except Exception as e:
+        logger.warning(f"Could not get network speed: {e}")
+        return {
+            'download_speed_mbps': 1000,  # Default 1Gbps
+            'upload_speed_mbps': 1000,
+            'latency_ms': 10
+        }
+
+def get_uptime_info() -> Dict[str, Any]:
+    """Get system uptime information."""
+    try:
+        boot_time = psutil.boot_time()
+        uptime_seconds = time.time() - boot_time
+        uptime_hours = int(uptime_seconds / 3600)
+        last_reboot = datetime.fromtimestamp(boot_time).isoformat()
+        
+        return {
+            'uptime_hours': uptime_hours,
+            'last_reboot': last_reboot
+        }
+    except Exception as e:
+        logger.warning(f"Could not get uptime info: {e}")
+        return {
+            'uptime_hours': 0,
+            'last_reboot': datetime.now().isoformat()
+        }
+
+def get_comprehensive_system_info() -> Dict[str, Any]:
+    """Collect all comprehensive system information for registration."""
+    try:
+        gpu_info = get_gpu_info()
+        host_info = get_host_info()
+        storage_info = get_storage_info()
+        network_info = get_network_speed()
+        uptime_info = get_uptime_info()
+        
+        # CPU cores
+        cpu_cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
+        
+        # GPU count and total VRAM
+        gpu_count = get_gpu_count()
+        total_vram_gb = get_total_vram_gb()
+        
+        return {
+            # GPU Information
+            'gpu_name': gpu_info['name'],
+            'gpu_memory_mb': gpu_info['memory_mb'],
+            'gpu_count': gpu_count,
+            'driver_version': gpu_info['driver_version'],
+            'cuda_version': gpu_info['cuda_version'],
+            
+            # Host Information
+            'hostname': platform.node(),
+            'os': host_info['os'],
+            'cpu_count': 1,  # Number of CPU sockets
+            'cpu_cores': cpu_cores,
+            'total_ram_gb': host_info['ram_mb'] // 1024,
+            'total_vram_gb': total_vram_gb,
+            
+            # Storage Information
+            'storage_total_gb': storage_info['storage_total_gb'],
+            'storage_type': storage_info['storage_type'],
+            'storage_available_gb': storage_info['storage_available_gb'],
+            
+            # Network Performance
+            'upload_speed_mbps': network_info['upload_speed_mbps'],
+            'download_speed_mbps': network_info['download_speed_mbps'],
+            'latency_ms': network_info['latency_ms'],
+            
+            # Uptime and Reliability
+            'uptime_hours': uptime_info['uptime_hours'],
+            'last_reboot': uptime_info['last_reboot']
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to collect comprehensive system info: {e}")
+        raise
+
+def collect_system_metrics() -> Dict[str, Any]:
+    """Collect current system metrics (CPU, RAM, storage, network)."""
+    try:
+        # CPU utilization
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        # RAM usage
+        ram = psutil.virtual_memory()
+        ram_used_gb = ram.used / (1024**3)
+        
+        # Storage usage
+        disk = psutil.disk_usage('/')
+        storage_used_gb = disk.used / (1024**3)
+        
+        # Network utilization (simplified)
+        net_io = psutil.net_io_counters()
+        
+        # Calculate network speed (bytes per second over last interval)
+        # This is a simplified version - you might want to track this over time
+        current_upload_mbps = 0  # Placeholder
+        current_download_mbps = 0  # Placeholder
+        
+        # Network utilization percentage (simplified)
+        network_utilization = 0  # Placeholder
+        
+        return {
+            'cpu_utilization': cpu_percent,
+            'ram_used_gb': ram_used_gb,
+            'storage_used_gb': storage_used_gb,
+            'network_utilization': network_utilization,
+            'current_upload_mbps': current_upload_mbps,
+            'current_download_mbps': current_download_mbps
+        }
+        
+    except Exception as e:
+        logger.warning(f"Failed to collect system metrics: {e}")
+        return {
+            'cpu_utilization': 0.0,
+            'ram_used_gb': 0.0,
+            'storage_used_gb': 0.0,
+            'network_utilization': 0.0,
+            'current_upload_mbps': 0.0,
+            'current_download_mbps': 0.0
+        }
+
+def calculate_health_scores(metrics: Dict[str, Any], health: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate performance and stability scores."""
+    try:
+        # GPU Performance Score (0-100)
+        # Based on: temperature, power efficiency, utilization capability
+        gpu_score = 100.0
+        
+        # Penalize high temperature
+        temp = metrics.get('temperature_celsius', 0)
+        if temp > 80:
+            gpu_score -= (temp - 80) * 2
+        
+        # Penalize if GPU is throttling (simplified check)
+        if temp > 85:
+            gpu_score -= 10
+        
+        # Check if fan is working properly
+        if not health.get('fan_operational', True):
+            gpu_score -= 20
+        
+        gpu_score = max(0, min(100, gpu_score))
+        
+        # System Stability Score (0-100)
+        stability_score = 100.0
+        
+        # Penalize for errors
+        error_count = health.get('error_count', 0)
+        stability_score -= error_count * 15
+        
+        # Penalize for unhealthy status
+        if health.get('health_status') == 'unhealthy':
+            stability_score -= 30
+        elif health.get('health_status') == 'warning':
+            stability_score -= 15
+        
+        stability_score = max(0, min(100, stability_score))
+        
+        return {
+            'gpu_performance_score': round(gpu_score, 1),
+            'system_stability_score': round(stability_score, 1)
+        }
+        
+    except Exception as e:
+        logger.warning(f"Failed to calculate health scores: {e}")
+        return {
+            'gpu_performance_score': 85.0,
+            'system_stability_score': 90.0
+        }

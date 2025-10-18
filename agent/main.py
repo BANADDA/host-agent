@@ -14,7 +14,10 @@ from .core.database import (cleanup_database, create_deployment,
                             store_health_check, update_deployment_status,
                             update_gpu_status)
 from .core.deployment import deploy_container, terminate_deployment
-from .core.hardware import collect_gpu_metrics, get_gpu_info, get_host_info
+from .core.hardware import (calculate_health_scores, collect_gpu_metrics,
+                            collect_system_metrics,
+                            get_comprehensive_system_info, get_gpu_info,
+                            get_host_info, get_uptime_info)
 from .core.monitoring import (start_command_polling, start_duration_monitor,
                               start_gpu_monitoring, start_health_monitoring,
                               start_health_push, start_heartbeat,
@@ -148,20 +151,47 @@ class TAOLIEHostAgent:
             logger.info(f"Already registered with UUID: {self.gpu_uuid}")
             return
         
-        # Collect system info
-        system_info = await self.collect_system_info()
+        # Collect comprehensive system info
+        comp_info = get_comprehensive_system_info()
         
-        # Prepare registration payload
+        # Prepare comprehensive registration payload
         payload = {
             "host_agent_id": self.agent_id,
-            "gpu_specs": system_info['gpu'],
-            "host_specs": system_info['host'],
-            "network_config": {
-                "public_ip": self.config['network']['public_ip'],
-                "ssh_port": self.config['network']['ports']['ssh'],
-                "rental_port_1": self.config['network']['ports']['rental_port_1'],
-                "rental_port_2": self.config['network']['ports']['rental_port_2']
-            }
+            
+            # GPU Information
+            "gpu_name": comp_info['gpu_name'],
+            "gpu_memory_mb": comp_info['gpu_memory_mb'],
+            "gpu_count": comp_info['gpu_count'],
+            "driver_version": comp_info['driver_version'],
+            "cuda_version": comp_info['cuda_version'],
+            
+            # Host Information
+            "hostname": comp_info['hostname'],
+            "os": comp_info['os'],
+            "cpu_count": comp_info['cpu_count'],
+            "cpu_cores": comp_info['cpu_cores'],
+            "total_ram_gb": comp_info['total_ram_gb'],
+            "total_vram_gb": comp_info['total_vram_gb'],
+            
+            # Storage Information
+            "storage_total_gb": comp_info['storage_total_gb'],
+            "storage_type": comp_info['storage_type'],
+            "storage_available_gb": comp_info['storage_available_gb'],
+            
+            # Network Performance
+            "upload_speed_mbps": comp_info['upload_speed_mbps'],
+            "download_speed_mbps": comp_info['download_speed_mbps'],
+            "latency_ms": comp_info['latency_ms'],
+            
+            # Uptime and Reliability
+            "uptime_hours": comp_info['uptime_hours'],
+            "last_reboot": comp_info['last_reboot'],
+            
+            # Network Configuration
+            "public_ip": self.config['network']['public_ip'],
+            "ssh_port": self.config['network']['ports']['ssh'],
+            "rental_port_1": self.config['network']['ports']['rental_port_1'],
+            "rental_port_2": self.config['network']['ports']['rental_port_2']
         }
         
         # Register with server
@@ -174,10 +204,10 @@ class TAOLIEHostAgent:
             gpu_data = {
                 'gpu_id': 'gpu-0',
                 'gpu_uuid': self.gpu_uuid,
-                'gpu_name': system_info['gpu']['name'],
-                'total_vram_mb': system_info['gpu']['memory_mb'],
-                'driver_version': system_info['gpu']['driver_version'],
-                'cuda_version': system_info['gpu']['cuda_version'],
+                'gpu_name': comp_info['gpu_name'],
+                'total_vram_mb': comp_info['gpu_memory_mb'],
+                'driver_version': comp_info['driver_version'],
+                'cuda_version': comp_info['cuda_version'],
                 'public_ip': self.config['network']['public_ip'],
                 'ssh_port': self.config['network']['ports']['ssh'],
                 'rental_port_1': self.config['network']['ports']['rental_port_1'],
